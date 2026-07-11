@@ -42,7 +42,8 @@ function write_summary_log(base_dir, chosen_simu, chosen_LOS, elapsed, cfg; conf
         config_saved_path !== nothing && println(io, "Config saved: $(config_saved_path)")
         for k in ("conversionn", "conversionT", "conversionV", "BoxLength_pc", "BoxLength_pix",
                   "velstart", "velend", "dvel", "TCNM", "TWNM", "phase_cubes", "compute_fractions",
-                  "compute_moments", "compute_fftcnm", "do_filter", "kernel_size_hi",
+                  "compute_moments", "compute_fftcnm", "compute_stats",
+                  "use_tiles", "tile", "do_filter", "kernel_size_hi",
                   "add_noise", "sigma", "rng_seed", "mu", "therm")
             haskey(cfg, k) && println(io, "$k: $(cfg[k])")
         end
@@ -186,6 +187,7 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     config["compute_fractions"] = yesno(ask_user("Compute mass/volume fraction maps? (Y/N)", get(config, "compute_fractions", true) ? "Y" : "N"; validate = is_yes_no))
     config["compute_moments"] = yesno(ask_user("Compute velocity moment maps (0/1/2)? (Y/N)", get(config, "compute_moments", true) ? "Y" : "N"; validate = is_yes_no))
     config["compute_fftcnm"] = yesno(ask_user("Compute FFT CNM tracer map (Marchal+24)? (Y/N)", get(config, "compute_fftcnm", false) ? "Y" : "N"; validate = is_yes_no))
+    config["compute_stats"] = yesno(ask_user("Compute spatial statistics (power spectrum + structure function)? (Y/N)", get(config, "compute_stats", false) ? "Y" : "N"; validate = is_yes_no))
 
     # 7. Beam smoothing -----------------------------------------------------
     section("Angular smoothing")
@@ -199,6 +201,13 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     config["add_noise"] = add_noise
     config["sigma"] = add_noise ? ask_user("Noise standard deviation (K)", Float64(get(config, "sigma", 0.1))) : get(config, "sigma", 0.0)
     config["rng_seed"] = add_noise ? ask_user("Random seed (integer; 0 for a random seed)", Int(get(config, "rng_seed", 1234))) : get(config, "rng_seed", 0)
+
+    # 8b. Performance / memory ---------------------------------------------
+    section("Performance")
+    use_tiles = yesno(ask_user("Use tiled low-memory processing? (2D products only, no PPV cubes) (Y/N)",
+                               get(config, "use_tiles", false) ? "Y" : "N"; validate = is_yes_no))
+    config["use_tiles"] = use_tiles
+    config["tile"] = use_tiles ? ask_user("Sky-plane tile size (pixels)", Int(get(config, "tile", 128))) : Int(get(config, "tile", 128))
 
     # 9. Lines of sight -----------------------------------------------------
     section("Lines of sight")
@@ -234,23 +243,40 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
 
     metadata = Dict("SHINEVER" => shine_version(), "SHINEGIT" => shine_git_hash())
 
+    use_tiles = get(cfg, "use_tiles", false)
+
     t0 = now()
     for simu in chosen_simu
         for LOS in chosen_LOS
-            ProcessHI(simu, LOS;
-                      TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = velArray,
-                      PixelLength_cm = PixelLength_cm,
-                      conversionn = cfg["conversionn"], conversionT = cfg["conversionT"],
-                      conversionV = cfg["conversionV"],
-                      phase_cubes = get(cfg, "phase_cubes", true),
-                      compute_fractions = get(cfg, "compute_fractions", true),
-                      compute_moments = get(cfg, "compute_moments", true),
-                      compute_fftcnm = get(cfg, "compute_fftcnm", false),
-                      do_filter = get(cfg, "do_filter", false),
-                      kernel_size_hi = get(cfg, "kernel_size_hi", 2.0),
-                      add_noise = get(cfg, "add_noise", false), sigma = get(cfg, "sigma", 0.0),
-                      rng = rng, mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
-                      metadata = metadata)
+            if use_tiles
+                ProcessHI_tiled(simu, LOS;
+                                TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = velArray,
+                                PixelLength_cm = PixelLength_cm, tile = Int(get(cfg, "tile", 128)),
+                                conversionn = cfg["conversionn"], conversionT = cfg["conversionT"],
+                                conversionV = cfg["conversionV"],
+                                compute_fractions = get(cfg, "compute_fractions", true),
+                                compute_moments = get(cfg, "compute_moments", true),
+                                compute_fftcnm = get(cfg, "compute_fftcnm", false),
+                                compute_stats = get(cfg, "compute_stats", false),
+                                mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
+                                metadata = metadata)
+            else
+                ProcessHI(simu, LOS;
+                          TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = velArray,
+                          PixelLength_cm = PixelLength_cm,
+                          conversionn = cfg["conversionn"], conversionT = cfg["conversionT"],
+                          conversionV = cfg["conversionV"],
+                          phase_cubes = get(cfg, "phase_cubes", true),
+                          compute_fractions = get(cfg, "compute_fractions", true),
+                          compute_moments = get(cfg, "compute_moments", true),
+                          compute_fftcnm = get(cfg, "compute_fftcnm", false),
+                          compute_stats = get(cfg, "compute_stats", false),
+                          do_filter = get(cfg, "do_filter", false),
+                          kernel_size_hi = get(cfg, "kernel_size_hi", 2.0),
+                          add_noise = get(cfg, "add_noise", false), sigma = get(cfg, "sigma", 0.0),
+                          rng = rng, mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
+                          metadata = metadata)
+            end
         end
     end
     elapsed = now() - t0

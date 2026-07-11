@@ -16,6 +16,7 @@ output directory.
 - `compute_fractions`(true): write mass- and volume-fraction maps.
 - `compute_moments` (true): write velocity moment 0/1/2 maps of `TbHI`.
 - `compute_fftcnm` (false): write the Marchal FFT CNM tracer map.
+- `compute_stats` (false): write power-spectrum + structure-function of NHI/mom0.
 - `do_filter` (false)     : Gaussian-smooth every cube (`kernel_size_hi` = σ pix).
 - `add_noise` (false)     : add Gaussian noise of std `sigma` [K]; independent
                             realisation per cube, drawn from `rng`.
@@ -27,6 +28,7 @@ function ProcessHI(simu, LOS;
                    conversionn::Real = 1.0, conversionT::Real = 1.0, conversionV::Real = 1.0,
                    phase_cubes::Bool = true, compute_fractions::Bool = true,
                    compute_moments::Bool = true, compute_fftcnm::Bool = false,
+                   compute_stats::Bool = false,
                    do_filter::Bool = false, kernel_size_hi::Real = 2.0,
                    add_noise::Bool = false, sigma::Real = 0.0, rng = Random.default_rng(),
                    mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
@@ -106,9 +108,11 @@ function ProcessHI(simu, LOS;
     end
 
     # --- velocity moments of the total HI cube -----------------------------
+    mom0map = nothing
     if compute_moments
         info_user("Computing velocity moment maps")
-        WriteData2D(resultspath, moment0(TbHI, velArray), "mom0"; metadata = metadata)
+        mom0map = moment0(TbHI, velArray)
+        WriteData2D(resultspath, mom0map, "mom0"; metadata = metadata)
         WriteData2D(resultspath, moment1(TbHI, velArray), "mom1"; metadata = metadata)
         WriteData2D(resultspath, moment2(TbHI, velArray), "mom2"; metadata = metadata)
     end
@@ -118,6 +122,14 @@ function ProcessHI(simu, LOS;
         info_user("Computing FFT CNM tracer map")
         dv = length(velArray) > 1 ? abs(float(velArray[2] - velArray[1])) : 1.0
         WriteData2D(resultspath, fft_cnm_map(TbHI, dv), "fftcnm"; metadata = metadata)
+    end
+
+    # --- spatial statistics ------------------------------------------------
+    if compute_stats
+        info_user("Computing spatial statistics (power spectrum + structure function)")
+        dx_pc = PixelLength_cm / PC_TO_CM
+        write_spatial_stats(resultspath, NHI, "NHI"; dx = dx_pc)
+        mom0map !== nothing && write_spatial_stats(resultspath, mom0map, "mom0"; dx = dx_pc)
     end
 
     printstyled("✓ Finished LOS $(LOS): products in $(resultspath)\n"; color = :green, bold = true)

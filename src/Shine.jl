@@ -33,13 +33,17 @@ include(joinpath("Physics", "StokesHI.jl"))
 include(joinpath("Physics", "Moments.jl"))
 include(joinpath("Physics", "FFTcnm.jl"))
 
+# --- Diagnostics: spatial statistics (numerical, no plotting backend) ------
+include(joinpath("Diagnostics", "SpatialStatistics.jl"))
+
 # --- Processing ------------------------------------------------------------
 include(joinpath("Processing", "Filter.jl"))
 include(joinpath("Processing", "Velocity.jl"))
 include(joinpath("Processing", "ProcessHI.jl"))
+include(joinpath("Processing", "TiledProcessing.jl"))
 
-# --- Diagnostics (loads CairoMakie; kept last so the numerical core is usable
-#     even if a plotting backend is unavailable at include time) ------------
+# --- Diagnostics: plotting (loads CairoMakie; kept last so the numerical core
+#     is usable even if a plotting backend is unavailable at include time) --
 include(joinpath("Diagnostics", "PhaseDiagram.jl"))
 
 # --- Interactive workflow --------------------------------------------------
@@ -58,7 +62,9 @@ export run_shine, SHINE_from_config, make_demo_data,
        moment0, moment1, moment2,
        fft_cnm, fft_cnm_map,
        LowPass, smooth_cube!, velocity_array, pixel_length_cm,
-       ProcessHI, phase_diagram, intLOS, maxLOS, sigmaLOS, logindgen
+       ProcessHI, ProcessHI_tiled, phase_diagram,
+       power_spectrum, structure_function, write_spatial_stats,
+       intLOS, maxLOS, sigmaLOS, logindgen
 
 const SHINE_PROJECT_ROOT = normpath(joinpath(@__DIR__, ".."))
 

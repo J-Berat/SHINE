@@ -1,5 +1,6 @@
 using Test
 using Shine
+using Statistics: var
 
 @testset "SHINE" begin
 
@@ -50,6 +51,44 @@ using Shine
     @testset "geometry helpers" begin
         @test pixel_length_cm(2.0, 2) ≈ Shine.PC_TO_CM
         @test_throws Exception velocity_array(0.0, 10.0, -1.0)
+    end
+
+    @testset "spatial statistics" begin
+        # White-noise map: flat power spectrum, structure function -> 2·variance.
+        img = randn(64, 64)
+        k, P = power_spectrum(img)
+        @test length(k) == length(P)
+        @test all(x -> isnan(x) || x >= 0, P)
+        r, S = structure_function(img)
+        finite = filter(!isnan, S)
+        @test isapprox(maximum(finite), 2 * var(img); rtol = 0.3)
+    end
+
+    @testset "structure function of a linear gradient grows with lag" begin
+        g = Float64[i for i in 1:32, _ in 1:32]
+        r, S = structure_function(g; nbins = 16)
+        finite_idx = findall(!isnan, S)
+        @test S[finite_idx[end]] > S[finite_idx[1]]
+    end
+
+    @testset "tiled processing matches full moment maps" begin
+        mktempdir() do dir
+            demo = make_demo_data(joinpath(dir, "demo"); npix = 12)
+            cfg = Shine.JSON.parsefile(demo.config_path)
+            vel = velocity_array(cfg["velstart"], cfg["velend"], cfg["dvel"])
+            plen = pixel_length_cm(cfg["BoxLength_pc"], Int(cfg["BoxLength_pix"]))
+            kw = (; TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = vel, PixelLength_cm = plen,
+                    compute_fractions = false, compute_fftcnm = false)
+            ProcessHI(demo.simu_dir, "z"; phase_cubes = false, kw...)
+            full_mom0 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom0.fits")) do f
+                read(f[1])
+            end
+            ProcessHI_tiled(demo.simu_dir, "z"; tile = 5, kw...)
+            tiled_mom0 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom0.fits")) do f
+                read(f[1])
+            end
+            @test tiled_mom0 ≈ full_mom0
+        end
     end
 
     @testset "end-to-end demo pipeline" begin

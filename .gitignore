@@ -1,0 +1,7 @@
+.DS_Store
+.ipynb_checkpoints/
+.Rhistory
+.fuse_hidden*
+Manifest.toml
+*.fits
+shine_demo/

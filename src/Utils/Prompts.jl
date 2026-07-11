@@ -1,0 +1,89 @@
+"""
+Prompting helpers shared by the interactive SHINE workflow.
+
+The look-and-feel (cyan `▸` marker, `[default]` hints, yellow warnings) is kept
+identical to MOOSE so that a user moving between the synchrotron and HI tools
+sees a consistent command-line experience.
+"""
+
+# --- internal formatting helpers -------------------------------------------
+
+const _PROMPT_MARK = "▸"
+
+# Strip a trailing colon / whitespace so we can append " [default]: " cleanly,
+# regardless of how the caller phrased the prompt.
+_clean_prompt(prompt::AbstractString) = rstrip(rstrip(prompt), ':') |> rstrip
+
+function _print_prompt(prompt::AbstractString, default)
+    printstyled("  ", _PROMPT_MARK, " "; color = :cyan, bold = true)
+    print(_clean_prompt(prompt))
+    printstyled(" [", default, "]"; color = :light_cyan)
+    print(": ")
+    flush(stdout)
+end
+
+# Styled, homogeneous feedback used across the interactive workflow.
+function warn_user(msg::AbstractString)
+    printstyled("    ↳ ", msg, "\n"; color = :yellow)
+    flush(stdout)
+end
+
+function error_user(msg::AbstractString)
+    printstyled("    ↳ ", msg, "\n"; color = :light_red, bold = true)
+    flush(stdout)
+end
+
+function info_user(msg::AbstractString)
+    printstyled("    ↳ ", msg, "\n"; color = :light_green)
+    flush(stdout)
+end
+
+# Section header used to break the questionnaire into labelled steps.
+function section(title::AbstractString)
+    printstyled("\n╭─ ", title, "\n"; color = :magenta, bold = true)
+    flush(stdout)
+end
+
+# Predicate for yes/no prompts: accepts only Y or N (case-insensitive).
+is_yes_no(answer) = uppercase(strip(String(answer))) in ("Y", "N")
+
+# --- public API ------------------------------------------------------------
+
+function ask_user(prompt::String, default::Float64)
+    while true
+        _print_prompt(prompt, default)
+        val = strip(readline())
+        isempty(val) && return default
+
+        parsed = tryparse(Float64, val)
+        parsed === nothing && warn_user("Please enter a numeric value (e.g., 1.0) or press Enter to use the default.")
+        parsed !== nothing && return parsed
+    end
+end
+
+function ask_user(prompt::String, default::Int64)
+    while true
+        _print_prompt(prompt, default)
+        val = strip(readline())
+        isempty(val) && return default
+
+        parsed = tryparse(Int, val)
+        parsed === nothing && warn_user("Please enter an integer value (e.g., 1 or 3) or press Enter to use the default.")
+        parsed !== nothing && return parsed
+    end
+end
+
+function ask_user(
+    prompt::String,
+    default::AbstractString;
+    validate::Function = _ -> true,
+    error_message::AbstractString = "Invalid input. Please try again.",
+)
+    while true
+        _print_prompt(prompt, default)
+        response = String(strip(readline()))
+        isempty(response) && (response = String(default))
+        validate(response) && return response
+        !isempty(error_message) && warn_user(error_message)
+    end
+end

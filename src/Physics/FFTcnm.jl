@@ -20,6 +20,10 @@ by the zero-frequency amplitude.
 """
 function fft_cnm(Tb::AbstractVector, dv::Real; klim::Real = 0.12)
     nv = length(Tb)
+    nv > 0 || throw(ArgumentError("Tb spectrum must not be empty."))
+    dv > 0 && isfinite(dv) || throw(ArgumentError("dv must be finite and positive (got $dv)."))
+    klim >= 0 && isfinite(klim) || throw(ArgumentError("klim must be finite and non-negative (got $klim)."))
+    all(isfinite, Tb) || throw(ArgumentError("Tb spectrum contains NaN or Inf."))
     k = fftfreq(nv, dv)
     t = abs.(fft(Tb))
     t[1] == 0 && return 0.0
@@ -36,6 +40,7 @@ end
 Apply [`fft_cnm`](@ref) to every line of sight of a `(nx, ny, nv)` cube.
 """
 function fft_cnm_map(Tb::AbstractArray{<:Real,3}, dv::Real; klim::Real = 0.12)
+    size(Tb, 3) > 0 || throw(ArgumentError("Tb cube must contain at least one velocity channel."))
     nx, ny = size(Tb, 1), size(Tb, 2)
     out = zeros(nx, ny)
     Threads.@threads for i in 1:nx

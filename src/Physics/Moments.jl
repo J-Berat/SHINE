@@ -14,8 +14,9 @@ Zeroth moment: `∫ T_B dv` [K km/s]. Proportional to the HI column density in t
 optically thin limit.
 """
 function moment0(Tb, velArray)
-    dv = _channel_width(velArray)
-    return dropdims(sum(Tb; dims = 3); dims = 3) .* dv
+    _, widths = _moment_inputs(Tb, velArray)
+    weights = reshape(widths, 1, 1, :)
+    return dropdims(sum(Tb .* weights; dims = 3); dims = 3)
 end
 
 """
@@ -26,8 +27,9 @@ clamped to be non-negative before weighting to avoid unphysical centroids from
 noise troughs.
 """
 function moment1(Tb, velArray)
-    v = reshape(collect(float.(velArray)), 1, 1, :)
-    w = max.(Tb, 0)
+    vel, widths = _moment_inputs(Tb, velArray)
+    v = reshape(vel, 1, 1, :)
+    w = max.(Tb, 0) .* reshape(widths, 1, 1, :)
     num = dropdims(sum(w .* v; dims = 3); dims = 3)
     den = dropdims(sum(w; dims = 3); dims = 3)
     return num ./ _safe(den)
@@ -39,13 +41,35 @@ end
 Second moment (velocity dispersion) `sqrt(∫ (v - v̄)² T_B dv / ∫ T_B dv)` [km/s].
 """
 function moment2(Tb, velArray)
-    v = reshape(collect(float.(velArray)), 1, 1, :)
-    w = max.(Tb, 0)
+    vel, widths = _moment_inputs(Tb, velArray)
+    v = reshape(vel, 1, 1, :)
+    w = max.(Tb, 0) .* reshape(widths, 1, 1, :)
     den = dropdims(sum(w; dims = 3); dims = 3)
     vbar = dropdims(sum(w .* v; dims = 3); dims = 3) ./ _safe(den)
     var = dropdims(sum(w .* (v .- reshape(vbar, size(vbar)..., 1)) .^ 2; dims = 3); dims = 3) ./ _safe(den)
     return sqrt.(max.(var, 0))
 end
 
-_channel_width(velArray) = length(velArray) > 1 ? abs(float(velArray[2] - velArray[1])) : 1.0
+function _moment_inputs(Tb, velArray)
+    ndims(Tb) == 3 || throw(DimensionMismatch("Tb must be a 3D (x, y, velocity) cube."))
+    vel = collect(float.(velArray))
+    length(vel) == size(Tb, 3) ||
+        throw(DimensionMismatch("velocity axis has $(length(vel)) channels, but Tb has $(size(Tb, 3))."))
+    isempty(vel) && throw(ArgumentError("velocity axis must not be empty."))
+    all(isfinite, vel) || throw(ArgumentError("velocity axis contains NaN or Inf."))
+
+    if length(vel) == 1
+        return vel, [1.0]
+    end
+    delta = diff(vel)
+    (all(>(0), delta) || all(<(0), delta)) ||
+        throw(ArgumentError("velocity channels must be strictly monotonic."))
+    delta = abs.(delta)
+    widths = Vector{Float64}(undef, length(vel))
+    widths[1] = delta[1]
+    widths[end] = delta[end]
+    @views widths[2:end-1] .= (delta[1:end-1] .+ delta[2:end]) ./ 2
+    return vel, widths
+end
+
 _safe(x) = map(v -> v == 0 ? oftype(v, NaN) : v, x)

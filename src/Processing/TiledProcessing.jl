@@ -59,8 +59,8 @@ function ProcessHI_tiled(simu, LOS;
     for i0 in 1:tile:nx, j0 in 1:tile:ny
         ir = i0:min(i0 + tile - 1, nx)
         jr = j0:min(j0 + tile - 1, ny)
-        Tb, _, _ = HIcube(n[ir, jr, :], VLOS[ir, jr, :], T[ir, jr, :], velArray, PixelLength_cm;
-                          mu = mu, therm = therm)
+        Tb = HIcube_tb(@view(n[ir, jr, :]), @view(VLOS[ir, jr, :]), @view(T[ir, jr, :]),
+                       velArray, PixelLength_cm; mu = mu, therm = therm)
 
         peakTb[ir, jr] .= maxLOS(Tb)
         if compute_moments

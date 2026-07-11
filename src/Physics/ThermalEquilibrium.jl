@@ -7,8 +7,6 @@ density to give the equilibrium temperature, which traces the classic bistable
 `P–n` curve overlaid on the phase diagrams.
 """
 
-using Interpolations: linear_interpolation, Line
-
 """
     ref_bistable(n, T) -> (Gamma, Lambda)
 
@@ -18,6 +16,8 @@ Lyman-α cooling, photoelectric heating on grains, and recombination cooling on
 charged grains (Wolfire et al. 1995, 2003).
 """
 function ref_bistable(n, T)
+    n > 0 && isfinite(n) || throw(ArgumentError("n must be finite and positive (got $n)."))
+    T > 0 && isfinite(T) || throw(ArgumentError("T must be finite and positive (got $T)."))
     # Electron density from the C II / hydrogen ionisation balance (Wolfire 2003, C15).
     neq = 2.4e-3 * ((T / 100)^0.25) / 0.5
     x = neq / n
@@ -56,10 +56,14 @@ end
 """
     tequilibrium(n; Tmin = 10, Tmax = 10000, npoints = 1000) -> Float64
 
-Equilibrium temperature [K] at density `n` [cm^-3], found by root-solving
-Λ(T) = Γ(T) via monotone interpolation of the net cooling `Λ − Γ`.
+Equilibrium temperature [K] at density `n` [cm^-3], found by bracketing a sign
+change of the net cooling `Λ − Γ` on a logarithmic temperature grid.
 """
 function tequilibrium(n; Tmin::Real = 10, Tmax::Real = 10000, npoints::Integer = 1000)
+    n > 0 && isfinite(n) || throw(ArgumentError("n must be finite and positive (got $n)."))
+    Tmin > 0 && isfinite(Tmin) || throw(ArgumentError("Tmin must be finite and positive."))
+    Tmax > Tmin && isfinite(Tmax) || throw(ArgumentError("Tmax must be finite and greater than Tmin."))
+    npoints >= 2 || throw(ArgumentError("npoints must be at least 2."))
     T = logindgen(npoints, Tmin, Tmax)
     net = similar(T)
     for i in eachindex(T)
@@ -67,12 +71,14 @@ function tequilibrium(n; Tmin::Real = 10, Tmax::Real = 10000, npoints::Integer =
         net[i] = Lambda - Gamma
     end
 
-    # Interpolation knots must be strictly increasing and unique.
-    order = sortperm(net)
-    net_sorted = net[order]
-    T_sorted = T[order]
-    keep = [true; diff(net_sorted) .!= 0]
-    itp = linear_interpolation(net_sorted[keep], T_sorted[keep]; extrapolation_bc = Line())
+    # Locate an actual bracket instead of sorting the non-monotonic cooling
+    # curve and extrapolating beyond the requested temperature interval.
+    exact = findfirst(==(0), net)
+    exact !== nothing && return T[exact]
+    bracket = findfirst(i -> signbit(net[i]) != signbit(net[i + 1]), 1:length(net)-1)
+    bracket === nothing && throw(DomainError(n,
+        "no thermal-equilibrium root in [$Tmin, $Tmax] K"))
 
-    return itp(0.0)
+    i = bracket
+    return T[i] - net[i] * (T[i + 1] - T[i]) / (net[i + 1] - net[i])
 end

@@ -110,10 +110,20 @@ Returned units after conversion: `n` in cm^-3, `VLOS` in km/s, `T` in K.
 """
 function ReadSimulation(simu, LOS, conversionn::Real, conversionT::Real, conversionV::Real)
     LOS in ("x", "y", "z") || error("Invalid LOS `$(LOS)`; expected \"x\", \"y\" or \"z\".")
+    all(isfinite, (conversionn, conversionT, conversionV)) ||
+        throw(ArgumentError("unit-conversion factors must be finite."))
 
     n = read_field(simu, "density") .* conversionn
     T = read_field(simu, "temperature") .* conversionT
     V = read_field(simu, _los_velocity_field(LOS)) .* conversionV
+
+    size(n) == size(T) == size(V) || throw(DimensionMismatch(
+        "simulation fields must have the same shape: density=$(size(n)), temperature=$(size(T)), velocity=$(size(V))."))
+    all(isfinite, n) || throw(ArgumentError("density contains NaN or Inf values."))
+    all(isfinite, T) || throw(ArgumentError("temperature contains NaN or Inf values."))
+    all(isfinite, V) || throw(ArgumentError("velocity contains NaN or Inf values."))
+    all(>=(0), n) || throw(ArgumentError("density contains negative values."))
+    all(>(0), T) || throw(ArgumentError("temperature must be strictly positive in every cell."))
 
     return _orient_los(n, LOS), _orient_los(V, LOS), _orient_los(T, LOS)
 end

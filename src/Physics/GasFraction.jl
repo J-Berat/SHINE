@@ -13,6 +13,8 @@ arrays. `n` is used as the mass weight.
 function GasFraction(n::AbstractArray, T::AbstractArray; TCNM::Real = 200, TWNM::Real = 2000)
     axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
     TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
+    all(isfinite, n) && all(isfinite, T) || throw(ArgumentError("n and T must contain only finite values."))
+    all(>=(0), n) || throw(ArgumentError("density weights must be non-negative."))
     total_mass = sum(n)
     total_mass > 0 || return (0.0, 0.0, 0.0)
 
@@ -36,6 +38,7 @@ each temperature bin (density-independent).
 function VolumeFraction(n::AbstractArray, T::AbstractArray; TCNM::Real = 200, TWNM::Real = 2000)
     axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
     TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
+    all(isfinite, T) || throw(ArgumentError("T must contain only finite values."))
     total = length(T)
     total > 0 || return (0.0, 0.0, 0.0)
 

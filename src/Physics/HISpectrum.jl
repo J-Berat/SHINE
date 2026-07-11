@@ -72,3 +72,34 @@ function HIspectrum(n, v, T, velvec, dz; mu::Real = 1.0, therm::Real = 0.0)
 
     return Tb, Tb_thin, tau_in_front
 end
+
+"""
+    HIspectrum_tb(n, v, T, velvec, dz; mu = 1.0, therm = 0.0) -> Tb
+
+Memory-saving radiative-transfer solver returning only the brightness spectrum.
+"""
+function HIspectrum_tb(n, v, T, velvec, dz; mu::Real = 1.0, therm::Real = 0.0)
+    nb = length(n)
+    nb == length(v) == length(T) ||
+        throw(DimensionMismatch("n, v and T must share the same LOS length."))
+    dz > 0 || throw(ArgumentError("dz must be positive (got $dz)."))
+    mu > 0 || throw(ArgumentError("mu must be positive (got $mu)."))
+    therm >= 0 || throw(ArgumentError("therm must be non-negative (got $therm)."))
+
+    Tb = zeros(length(velvec))
+    tau_in_front = zeros(length(velvec))
+    @inbounds for k in 1:nb
+        (n[k] <= 0 || T[k] <= 0) && continue
+        sig_therm = therm > 0 ? float(therm) : sqrt(K_PLANCK * T[k] / (1.0e3 * M_H * mu))
+        inv_sig = 1.0 / sig_therm
+        norm = inv_sig / sqrt(2π)
+        Tk = T[k]
+        for j in eachindex(velvec)
+            arg = (velvec[j] - v[k]) * inv_sig
+            tau_k = exp(-0.5 * arg * arg) * norm * n[k] * dz / (C_TAU * Tk)
+            Tb[j] += Tk * (-expm1(-tau_k)) * exp(-tau_in_front[j])
+            tau_in_front[j] += tau_k
+        end
+    end
+    return Tb
+end

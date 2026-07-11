@@ -55,7 +55,7 @@ include(joinpath("Interactive", "DemoData.jl"))
 export run_shine, SHINE_from_config, make_demo_data,
        ReadSimulation, read_field, get_simulation_list,
        WriteData2D, WriteData3D,
-       HIspectrum, HIcube, HIPhases, HIColumnDensity,
+       HIspectrum, HIspectrum_tb, HIcube, HIcube_tb, HIPhases, HIColumnDensity,
        GasFraction, VolumeFraction, GasFractionMap, VolumeFractionMap,
        ref_bistable, tequilibrium,
        QHI, UHI, thetaHI, PHI, PolarFractionHI,

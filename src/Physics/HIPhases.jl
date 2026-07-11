@@ -18,6 +18,9 @@ element-wise so `nCNM .+ nLNM .+ nWNM == n` exactly.
 function HIPhases(n, T; TCNM::Real = 200, TWNM::Real = 2000)
     axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
     TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
+    all(isfinite, n) && all(isfinite, T) || throw(ArgumentError("n and T must contain only finite values."))
+    all(>=(0), n) || throw(ArgumentError("density must be non-negative."))
+    all(>(0), T) || throw(ArgumentError("temperature must be strictly positive."))
     maskCNM = T .< TCNM
     maskLNM = (T .>= TCNM) .& (T .< TWNM)
     maskWNM = T .>= TWNM

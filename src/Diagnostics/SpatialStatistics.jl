@@ -14,6 +14,8 @@ using Statistics: mean
 # Azimuthally average `values` over `radii` into `nbins` equal-width bins,
 # ignoring the zero-radius (DC) point. Returns (bin centres, mean per bin).
 function _radial_average(values::AbstractArray, radii::AbstractArray, nbins::Integer)
+    axes(values) == axes(radii) || throw(DimensionMismatch("values and radii must share the same axes."))
+    nbins > 0 || throw(ArgumentError("nbins must be positive (got $nbins)."))
     rmax = maximum(radii)
     edges = range(0, rmax; length = nbins + 1)
     centres = 0.5 .* (edges[1:end-1] .+ edges[2:end])
@@ -38,6 +40,7 @@ the wavenumber `k`, in cycles per `dx`-unit). The mean is removed before the
 transform. Returns the binned wavenumber `k` and power `P(k)`.
 """
 function power_spectrum(map::AbstractMatrix; dx::Real = 1.0, nbins::Integer = 50)
+    _validate_spatial_inputs(map, dx, nbins)
     n, m = size(map)
     F = fft(map .- mean(map))
     P = abs2.(F) ./ (n * m)
@@ -58,6 +61,8 @@ Azimuthally averaged structure function `SF_p(r) = ⟨|f(x+r) − f(x)|^p⟩` of
 sets the physical lag units. Returns the binned lag `r` and `SF(r)`.
 """
 function structure_function(map::AbstractMatrix; dx::Real = 1.0, nbins::Integer = 50, order::Real = 2)
+    _validate_spatial_inputs(map, dx, nbins)
+    order > 0 && isfinite(order) || throw(ArgumentError("order must be finite and positive (got $order)."))
     n, m = size(map)
     lagx = [min(i - 1, n - (i - 1)) for i in 1:n]
     lagy = [min(j - 1, m - (j - 1)) for j in 1:m]
@@ -71,13 +76,25 @@ function structure_function(map::AbstractMatrix; dx::Real = 1.0, nbins::Integer 
         return _radial_average(sf, r, nbins)
     end
 
-    # General order: average |f(x+lag) − f(x)|^order over the map via circshift.
+    # General order: direct periodic lag sampling without allocating a shifted
+    # copy of the complete map for every lag.
     sf = zeros(n, m)
     @inbounds for j in 1:m, i in 1:n
-        shifted = circshift(map, (i - 1, j - 1))
-        sf[i, j] = mean(abs.(shifted .- map) .^ order)
+        acc = 0.0
+        for y in 1:m, x in 1:n
+            acc += abs(map[mod1(x + i - 1, n), mod1(y + j - 1, m)] - map[x, y]) ^ order
+        end
+        sf[i, j] = acc / (n * m)
     end
     return _radial_average(sf, r, nbins)
+end
+
+function _validate_spatial_inputs(map, dx, nbins)
+    !isempty(map) || throw(ArgumentError("map must not be empty."))
+    dx > 0 && isfinite(dx) || throw(ArgumentError("dx must be finite and positive (got $dx)."))
+    nbins > 0 || throw(ArgumentError("nbins must be positive (got $nbins)."))
+    all(isfinite, map) || throw(ArgumentError("map contains NaN or Inf values."))
+    return nothing
 end
 
 """

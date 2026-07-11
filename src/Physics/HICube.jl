@@ -44,3 +44,34 @@ function HIcube(n, V, T, velArray, PixelLength_cm; mu::Real = 1.0, therm::Real =
 
     return Tb, Tb_thin, tau
 end
+
+
+"""
+    HIcube_tb(n, V, T, velArray, PixelLength_cm; kwargs...) -> Tb
+
+Build only the brightness-temperature cube, avoiding the two additional output
+cubes allocated by [`HIcube`](@ref).
+"""
+function HIcube_tb(n, V, T, velArray, PixelLength_cm; mu::Real = 1.0, therm::Real = 0.0,
+                   progress::Union{Nothing,Function} = nothing)
+    size(n) == size(V) == size(T) ||
+        throw(DimensionMismatch("n, V and T cubes must share the same shape."))
+    ndims(n) == 3 || throw(DimensionMismatch("n, V and T must be 3D cubes."))
+
+    nx, ny = size(n, 1), size(n, 2)
+    velvec = collect(float.(velArray))
+    Tb = zeros(nx, ny, length(velvec))
+    done = Threads.Atomic{Int}(0)
+    Threads.@threads for x in 1:nx
+        for y in 1:ny
+            tb = HIspectrum_tb(@view(n[x, y, :]), @view(V[x, y, :]), @view(T[x, y, :]),
+                               velvec, PixelLength_cm; mu = mu, therm = therm)
+            @views Tb[x, y, :] .= tb
+        end
+        if progress !== nothing
+            Threads.atomic_add!(done, 1)
+            progress(done[])
+        end
+    end
+    return Tb
+end

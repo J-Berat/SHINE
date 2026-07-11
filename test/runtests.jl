@@ -1,5 +1,6 @@
 using Test
 using Shine
+using HDF5: h5open
 using Statistics: var
 
 @testset "SHINE" begin
@@ -40,6 +41,9 @@ using Statistics: var
         @test_throws ArgumentError HIspectrum(n, v, T, vel, 0.0)
         @test_throws ArgumentError HIspectrum(n, v, T, vel, dz; mu = 0.0)
         @test_throws ArgumentError HIspectrum(n, v, T, vel, dz; therm = -1.0)
+
+        full = HIspectrum(n, v, T, vel, dz)[1]
+        @test HIspectrum_tb(n, v, T, vel, dz) ≈ full
     end
 
     @testset "velocity moments recover an injected Gaussian line" begin
@@ -49,11 +53,20 @@ using Statistics: var
         Tb = reshape(prof, 1, 1, :)
         @test moment1(Tb, vel)[1, 1] ≈ v0 atol = 0.1
         @test moment2(Tb, vel)[1, 1] ≈ sig atol = 0.1
+
+        irregular = [0.0, 1.0, 3.0]
+        flat = ones(1, 1, 3)
+        @test moment0(flat, irregular)[1, 1] ≈ 4.5
+        @test_throws DimensionMismatch moment0(Tb, vel[1:end-1])
+        @test_throws ArgumentError moment1(flat, [0.0, 2.0, 1.0])
     end
 
     @testset "thermal equilibrium is a sensible temperature" begin
         Tequ = tequilibrium(1.0)
         @test 10 < Tequ < 10_000
+        @test_throws ArgumentError tequilibrium(0.0)
+        @test_throws ArgumentError tequilibrium(1.0; npoints = 1)
+        @test_throws DomainError tequilibrium(1.0; Tmin = 10, Tmax = 11)
     end
 
     @testset "geometry helpers" begin
@@ -76,6 +89,9 @@ using Statistics: var
         r, S = structure_function(img)
         finite = filter(!isnan, S)
         @test isapprox(maximum(finite), 2 * var(img); rtol = 0.3)
+        @test_throws ArgumentError power_spectrum(img; dx = 0)
+        @test_throws ArgumentError structure_function(fill(NaN, 2, 2))
+        @test_throws ArgumentError structure_function(img; order = 0)
     end
 
     @testset "structure function of a linear gradient grows with lag" begin
@@ -97,12 +113,62 @@ using Statistics: var
             full_mom0 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom0.fits")) do f
                 read(f[1])
             end
+            full_mom1 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom1.fits")) do f
+                read(f[1])
+            end
+            full_mom2 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom2.fits")) do f
+                read(f[1])
+            end
             ProcessHI_tiled(demo.simu_dir, "z"; tile = 5, kw...)
             tiled_mom0 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom0.fits")) do f
                 read(f[1])
             end
             @test tiled_mom0 ≈ full_mom0
+            tiled_mom1 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom1.fits")) do f
+                read(f[1])
+            end
+            tiled_mom2 = Shine.FITSIO.FITS(joinpath(demo.simu_dir, "z", "HI", "mom2.fits")) do f
+                read(f[1])
+            end
+            @test tiled_mom1 ≈ full_mom1
+            @test tiled_mom2 ≈ full_mom2
         end
+    end
+
+    @testset "simulation readers validate and orient fields" begin
+        mktempdir() do dir
+            demo = make_demo_data(joinpath(dir, "fits"); npix = 5)
+            for (los, expected) in (("x", (5, 5, 5)), ("y", (5, 5, 5)), ("z", (5, 5, 5)))
+                n, v, T = ReadSimulation(demo.simu_dir, los, 1.0, 1.0, 1.0)
+                @test size(n) == size(v) == size(T) == expected
+            end
+
+            h5dir = joinpath(dir, "hdf5")
+            mkpath(h5dir)
+            h5open(joinpath(h5dir, "fields.h5"), "w") do h5
+                h5["density"] = ones(2, 3, 4)
+                h5["temperature"] = fill(100.0, 2, 3, 4)
+                h5["velocity_x"] = zeros(2, 3, 4)
+            end
+            hn, hv, hT = ReadSimulation(h5dir, "x", 1.0, 1.0, 1.0)
+            @test size(hn) == size(hv) == size(hT) == (3, 4, 2)
+
+            bad = joinpath(dir, "bad")
+            mkpath(bad)
+            h5open(joinpath(bad, "fields.h5"), "w") do h5
+                h5["density"] = ones(2, 2, 2)
+                h5["temperature"] = fill(100.0, 2, 2, 3)
+                h5["velocity_z"] = zeros(2, 2, 2)
+            end
+            @test_throws DimensionMismatch ReadSimulation(bad, "z", 1.0, 1.0, 1.0)
+        end
+    end
+
+    @testset "non-finite and unphysical inputs are rejected" begin
+        @test_throws ArgumentError GasFraction([-1.0, 2.0], [100.0, 3000.0])
+        @test_throws ArgumentError VolumeFraction(ones(2), [100.0, NaN])
+        @test_throws ArgumentError fft_cnm([1.0, NaN], 1.0)
+        @test_throws ArgumentError fft_cnm([1.0], 0.0)
     end
 
     @testset "end-to-end demo pipeline" begin

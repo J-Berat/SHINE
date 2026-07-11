@@ -82,12 +82,6 @@ For each simulation and line of sight, in `<simu>/<LOS>/HI/`:
 | `fCNMmass`, … / `fCNMvol`, … | 2D | mass / volume fraction maps [%] |
 | `fftcnm` | 2D | Fourier CNM tracer |
 
-## Citation
-
-If you use SHINE in scientific work, please cite the associated paper (in prep.)
-and the companion synchrotron tool
-[Berat et al. (2026), A&A 708, A245](https://ui.adsabs.harvard.edu/abs/2026A%26A...708A.245B/abstract).
-
 ## License
 
 SHINE is distributed under the [MIT License](LICENSE).

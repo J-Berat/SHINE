@@ -16,7 +16,8 @@ Split a density field into CNM (`T < TCNM`), LNM (`TCNM ≤ T < TWNM`) and WNM
 element-wise so `nCNM .+ nLNM .+ nWNM == n` exactly.
 """
 function HIPhases(n, T; TCNM::Real = 200, TWNM::Real = 2000)
-    TCNM <= TWNM || error("TCNM ($TCNM) must be <= TWNM ($TWNM).")
+    axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
+    TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
     maskCNM = T .< TCNM
     maskLNM = (T .>= TCNM) .& (T .< TWNM)
     maskWNM = T .>= TWNM

@@ -33,24 +33,24 @@ function HIspectrum(n, v, T, velvec, dz; mu::Real = 1.0, therm::Real = 0.0)
     nb = length(n)
     nb == length(v) == length(T) ||
         throw(DimensionMismatch("n, v and T must share the same LOS length."))
+    dz > 0 || throw(ArgumentError("dz must be positive (got $dz)."))
+    mu > 0 || throw(ArgumentError("mu must be positive (got $mu)."))
+    therm >= 0 || throw(ArgumentError("therm must be non-negative (got $therm)."))
 
     # Thermal velocity dispersion [km/s]. sqrt(k T / (m mu)) with m in g and the
     # 1e3 factor converting the SI Boltzmann constant to a km/s dispersion.
-    if therm > 0
-        sig_therm = fill(float(therm), nb)
-    else
-        sig_therm = @. sqrt(K_PLANCK * max(T, zero(eltype(T))) / (1.0e3 * M_H * mu))
-    end
-
     nbvec = length(velvec)
     Tb = zeros(nbvec)
     Tb_thin = zeros(nbvec)
     tau_in_front = zeros(nbvec)
 
     @inbounds for k in 1:nb
-        (n[k] <= 0 || T[k] <= 0 || sig_therm[k] <= 0) && continue
+        (n[k] <= 0 || T[k] <= 0) && continue
 
-        inv_sig = 1.0 / sig_therm[k]
+        # Compute the broadening lazily to avoid allocating a LOS-sized array.
+        sig_therm = therm > 0 ? float(therm) : sqrt(K_PLANCK * T[k] / (1.0e3 * M_H * mu))
+
+        inv_sig = 1.0 / sig_therm
         norm = inv_sig / sqrt(2π)
         Tk = T[k]
 
@@ -62,7 +62,9 @@ function HIspectrum(n, v, T, velvec, dz; mu::Real = 1.0, therm::Real = 0.0)
             N = G * n[k] * dz
             tau_k = N / (C_TAU * Tk)
 
-            Tb[j] += Tk * (1.0 - exp(-tau_k)) * exp(-tau_in_front[j])
+            # expm1 retains accuracy when tau_k is much smaller than machine
+            # precision, which is common in optically thin cells.
+            Tb[j] += Tk * (-expm1(-tau_k)) * exp(-tau_in_front[j])
             Tb_thin[j] += tau_k * Tk
             tau_in_front[j] += tau_k
         end

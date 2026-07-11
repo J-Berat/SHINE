@@ -17,6 +17,7 @@ function HIcube(n, V, T, velArray, PixelLength_cm; mu::Real = 1.0, therm::Real =
                 progress::Union{Nothing,Function} = nothing)
     size(n) == size(V) == size(T) ||
         throw(DimensionMismatch("n, V and T cubes must share the same shape."))
+    ndims(n) == 3 || throw(DimensionMismatch("n, V and T must be 3D cubes."))
 
     nx, ny = size(n, 1), size(n, 2)
     nv = length(velArray)

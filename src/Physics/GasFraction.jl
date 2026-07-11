@@ -11,6 +11,8 @@ Mass fraction (in percent) of each phase over the supplied density/temperature
 arrays. `n` is used as the mass weight.
 """
 function GasFraction(n::AbstractArray, T::AbstractArray; TCNM::Real = 200, TWNM::Real = 2000)
+    axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
+    TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
     total_mass = sum(n)
     total_mass > 0 || return (0.0, 0.0, 0.0)
 
@@ -32,6 +34,8 @@ Volume filling fraction (in percent) of each phase, i.e. the fraction of cells i
 each temperature bin (density-independent).
 """
 function VolumeFraction(n::AbstractArray, T::AbstractArray; TCNM::Real = 200, TWNM::Real = 2000)
+    axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
+    TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
     total = length(T)
     total > 0 || return (0.0, 0.0, 0.0)
 
@@ -44,6 +48,7 @@ end
 
 # Shared machinery for the per-pixel maps: `f` returns a 3-tuple for one LOS.
 function _phase_map(f, n::AbstractArray, T::AbstractArray; TCNM, TWNM)
+    ndims(n) == 3 || throw(DimensionMismatch("n and T must be 3D cubes."))
     nx, ny = size(n, 1), size(n, 2)
     mapCNM = zeros(nx, ny)
     mapLNM = zeros(nx, ny)

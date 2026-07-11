@@ -32,6 +32,14 @@ using Statistics: var
         Tb, Tb_thin, tau = HIspectrum(n, v, T, vel, dz)
         @test maximum(tau) < 1e-2
         @test isapprox(Tb, Tb_thin; rtol = 1e-2)
+
+        # Very small optical depths must not be rounded down to zero.
+        tiny, tiny_thin, _ = HIspectrum([1e-20], [0.0], [100.0], [0.0], dz)
+        @test tiny[1] > 0
+        @test tiny[1] ≈ tiny_thin[1] rtol = 1e-12
+        @test_throws ArgumentError HIspectrum(n, v, T, vel, 0.0)
+        @test_throws ArgumentError HIspectrum(n, v, T, vel, dz; mu = 0.0)
+        @test_throws ArgumentError HIspectrum(n, v, T, vel, dz; therm = -1.0)
     end
 
     @testset "velocity moments recover an injected Gaussian line" begin
@@ -51,6 +59,12 @@ using Statistics: var
     @testset "geometry helpers" begin
         @test pixel_length_cm(2.0, 2) ≈ Shine.PC_TO_CM
         @test_throws Exception velocity_array(0.0, 10.0, -1.0)
+    end
+
+    @testset "invalid shapes are rejected" begin
+        @test_throws DimensionMismatch HIPhases(ones(2), ones(3))
+        @test_throws DimensionMismatch GasFraction(ones(2), ones(3))
+        @test_throws DimensionMismatch HIcube(ones(2, 2), ones(2, 2), ones(2, 2), [0.0], 1.0)
     end
 
     @testset "spatial statistics" begin

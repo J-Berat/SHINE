@@ -135,6 +135,82 @@ using Statistics: var
         end
     end
 
+    @testset "tiled run writes mass *and* volume fraction maps" begin
+        mktempdir() do dir
+            demo = make_demo_data(joinpath(dir, "demo"); npix = 6)
+            cfg = Shine.JSON.parsefile(demo.config_path)
+            vel = velocity_array(cfg["velstart"], cfg["velend"], cfg["dvel"])
+            plen = pixel_length_cm(cfg["BoxLength_pc"], Int(cfg["BoxLength_pix"]))
+            ProcessHI_tiled(demo.simu_dir, "z";
+                            TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = vel,
+                            PixelLength_cm = plen, tile = 4,
+                            compute_fractions = true, compute_moments = false,
+                            compute_fftcnm = false)
+            hi = joinpath(demo.simu_dir, "z", "HI")
+            # The tiled path must emit the same fraction product set as ProcessHI.
+            for name in ("fCNMmass", "fLNMmass", "fWNMmass", "fCNMvol", "fLNMvol", "fWNMvol")
+                @test isfile(joinpath(hi, name * ".fits"))
+            end
+        end
+    end
+
+    @testset "progress callback" begin
+        # Disabled display must yield `nothing` so the kernels skip their counter.
+        @test Shine.make_progress("job", 10; enabled = false) === nothing
+        @test Shine.make_progress("job", 0; enabled = true) === nothing
+
+        cb = Shine.make_progress("job", 4; enabled = true)
+        @test cb isa Function
+        mktemp() do path, io
+            redirect_stdout(io) do
+                for k in 1:4
+                    cb(k)
+                end
+            end
+            flush(io)
+            text = read(path, String)
+            @test occursin("job", text)
+            @test occursin("100%", text)
+        end
+    end
+
+    @testset "elapsed-time formatting" begin
+        @test Shine._fmt_elapsed(45) == "45s"
+        @test Shine._fmt_elapsed(125) == "2m05s"
+        @test Shine._fmt_elapsed(3725) == "1h02m"
+    end
+
+    @testset "numeric prompts enforce validation" begin
+        # This is what guards the new `mu > 0` / `therm >= 0` questions: the
+        # rejected first answer is re-asked, the valid second one is returned.
+        mktemp() do path, io
+            write(io, "-1.0\n2.5\n")
+            flush(io)
+            seekstart(io)
+            val = redirect_stdout(devnull) do
+                redirect_stdin(io) do
+                    Shine.ask_user("mean molecular weight", 1.0;
+                                   validate = x -> x > 0,
+                                   error_message = "must be strictly positive")
+                end
+            end
+            @test val == 2.5
+        end
+
+        # An empty line keeps the default without running `validate`.
+        mktemp() do path, io
+            write(io, "\n")
+            flush(io)
+            seekstart(io)
+            val = redirect_stdout(devnull) do
+                redirect_stdin(io) do
+                    Shine.ask_user("fixed dispersion", 0.0; validate = x -> x >= 0)
+                end
+            end
+            @test val == 0.0
+        end
+    end
+
     @testset "simulation readers validate and orient fields" begin
         mktempdir() do dir
             demo = make_demo_data(joinpath(dir, "fits"); npix = 5)

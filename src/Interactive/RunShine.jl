@@ -181,7 +181,18 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     config["TCNM"] = ask_user("CNM/LNM temperature threshold TCNM (K)", Float64(get(config, "TCNM", 200.0)))
     config["TWNM"] = ask_user("LNM/WNM temperature threshold TWNM (K)", Float64(get(config, "TWNM", 2000.0)))
 
-    # 6. Products -----------------------------------------------------------
+    # 6. Line broadening ----------------------------------------------------
+    section("Line broadening")
+    config["mu"] = ask_user("Mean molecular weight for the thermal dispersion",
+                            Float64(get(config, "mu", 1.0));
+                            validate = x -> x > 0,
+                            error_message = "The mean molecular weight must be strictly positive.")
+    config["therm"] = ask_user("Fixed velocity dispersion (km/s; 0 = use the thermal one)",
+                               Float64(get(config, "therm", 0.0));
+                               validate = x -> x >= 0,
+                               error_message = "The velocity dispersion must be non-negative.")
+
+    # 7. Products -----------------------------------------------------------
     section("Data products")
     config["phase_cubes"] = yesno(ask_user("Build per-phase T_B cubes (CNM/LNM/WNM)? (Y/N)", get(config, "phase_cubes", true) ? "Y" : "N"; validate = is_yes_no))
     config["compute_fractions"] = yesno(ask_user("Compute mass/volume fraction maps? (Y/N)", get(config, "compute_fractions", true) ? "Y" : "N"; validate = is_yes_no))
@@ -189,27 +200,27 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     config["compute_fftcnm"] = yesno(ask_user("Compute FFT CNM tracer map (Marchal+24)? (Y/N)", get(config, "compute_fftcnm", false) ? "Y" : "N"; validate = is_yes_no))
     config["compute_stats"] = yesno(ask_user("Compute spatial statistics (power spectrum + structure function)? (Y/N)", get(config, "compute_stats", false) ? "Y" : "N"; validate = is_yes_no))
 
-    # 7. Beam smoothing -----------------------------------------------------
+    # 8. Beam smoothing -----------------------------------------------------
     section("Angular smoothing")
     do_filter = yesno(ask_user("Apply Gaussian beam smoothing? (Y/N)", get(config, "do_filter", false) ? "Y" : "N"; validate = is_yes_no))
     config["do_filter"] = do_filter
     config["kernel_size_hi"] = do_filter ? ask_user("Gaussian beam sigma (pixels)", Float64(get(config, "kernel_size_hi", 2.0))) : get(config, "kernel_size_hi", 2.0)
 
-    # 8. Noise --------------------------------------------------------------
+    # 9. Noise --------------------------------------------------------------
     section("Noise")
     add_noise = yesno(ask_user("Add Gaussian noise to brightness cubes? (Y/N)", get(config, "add_noise", false) ? "Y" : "N"; validate = is_yes_no))
     config["add_noise"] = add_noise
     config["sigma"] = add_noise ? ask_user("Noise standard deviation (K)", Float64(get(config, "sigma", 0.1))) : get(config, "sigma", 0.0)
     config["rng_seed"] = add_noise ? ask_user("Random seed (integer; 0 for a random seed)", Int(get(config, "rng_seed", 1234))) : get(config, "rng_seed", 0)
 
-    # 8b. Performance / memory ---------------------------------------------
+    # 9b. Performance / memory ---------------------------------------------
     section("Performance")
     use_tiles = yesno(ask_user("Use tiled low-memory processing? (2D products only, no PPV cubes) (Y/N)",
                                get(config, "use_tiles", false) ? "Y" : "N"; validate = is_yes_no))
     config["use_tiles"] = use_tiles
     config["tile"] = use_tiles ? ask_user("Sky-plane tile size (pixels)", Int(get(config, "tile", 128))) : Int(get(config, "tile", 128))
 
-    # 9. Lines of sight -----------------------------------------------------
+    # 10. Lines of sight -----------------------------------------------------
     section("Lines of sight")
     los_choice = ask_user("Enter 'all' or comma-separated lines of sight (e.g., x,z)",
                           get(config, "chosen_LOS_input", "all");
@@ -218,7 +229,7 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     chosen_LOS = _parse_los(los_choice)
     config["chosen_LOS_input"] = los_choice
 
-    # 10. Save config -------------------------------------------------------
+    # 11. Save config -------------------------------------------------------
     section("Save configuration")
     save_path = ask_user("Path where the configuration should be saved", get(config, "config_path", default_config_path))
     saved_path = save_config(config, save_path)

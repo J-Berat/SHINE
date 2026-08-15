@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch cancels the run still in flight for that same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Julia ${{ matrix.julia-version }} — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # '1.10' is the lower bound declared in Project.toml; '1' tracks the
+        # current stable release so a breaking upstream change shows up here.
+        julia-version: ['1.10', '1']
+        os: [ubuntu-latest]
+        include:
+          - julia-version: '1'
+            os: macOS-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+          arch: x64
+
+      - uses: julia-actions/cache@v2
+
+      - uses: julia-actions/julia-buildpkg@v1
+
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          # The radiative transfer is threaded over sky columns; running the
+          # suite on more than one thread exercises that path.
+          JULIA_NUM_THREADS: '2'
+
+  # The tests import Shine, which loads CairoMakie. Keep a cheap job that only
+  # checks the package precompiles, so a plotting-backend regression is
+  # distinguishable from a genuine test failure.
+  load:
+    name: Package loads
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v2
+      - run: julia --startup-file=no --project -e 'using Pkg; Pkg.instantiate()'
+      - run: julia --startup-file=no --project -e 'using Shine; println(Shine.shine_version())'

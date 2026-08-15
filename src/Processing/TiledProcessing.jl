@@ -45,6 +45,12 @@ function ProcessHI_tiled(simu, LOS;
         WriteData2D(resultspath, fCm, "fCNMmass"; metadata = metadata)
         WriteData2D(resultspath, fLm, "fLNMmass"; metadata = metadata)
         WriteData2D(resultspath, fWm, "fWNMmass"; metadata = metadata)
+        # Volume fractions are cheap (they need no PPV cube) and are part of the
+        # `ProcessHI` product set, so the tiled run must emit them too.
+        fCv, fLv, fWv = VolumeFractionMap(n, T; TCNM = TCNM, TWNM = TWNM)
+        WriteData2D(resultspath, fCv, "fCNMvol"; metadata = metadata)
+        WriteData2D(resultspath, fLv, "fLNMvol"; metadata = metadata)
+        WriteData2D(resultspath, fWv, "fWNMvol"; metadata = metadata)
     end
 
     # 2D accumulators filled tile by tile.
@@ -56,6 +62,10 @@ function ProcessHI_tiled(simu, LOS;
 
     ntiles = cld(nx, tile) * cld(ny, tile)
     info_user("Streaming $(ntiles) sky tile(s) through the radiative transfer")
+    # One bar over the whole sweep: a per-tile bar inside `HIcube_tb` would
+    # restart at 0% on every tile.
+    progress = make_progress("tiles", ntiles)
+    tiles_done = 0
     for i0 in 1:tile:nx, j0 in 1:tile:ny
         ir = i0:min(i0 + tile - 1, nx)
         jr = j0:min(j0 + tile - 1, ny)
@@ -69,6 +79,9 @@ function ProcessHI_tiled(simu, LOS;
             mom2[ir, jr] .= moment2(Tb, velArray)
         end
         compute_fftcnm && (fftc[ir, jr] .= fft_cnm_map(Tb, dv))
+
+        tiles_done += 1
+        progress !== nothing && progress(tiles_done)
     end
 
     WriteData2D(resultspath, peakTb, "TbHI_peak"; metadata = metadata)

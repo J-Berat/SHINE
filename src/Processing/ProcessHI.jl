@@ -62,8 +62,10 @@ function ProcessHI(simu, LOS;
     end
 
     # --- radiative transfer ------------------------------------------------
+    nx = size(n, 1)
     info_user("Solving 21-cm radiative transfer (total HI cube)")
-    TbHI, TbthinHI, tauHI = HIcube(n, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm)
+    TbHI, TbthinHI, tauHI = HIcube(n, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm,
+                                   progress = make_progress("total", nx))
 
     cubes = Dict{String,Array{Float64,3}}(
         "TbHI" => TbHI, "TbthinHI" => TbthinHI, "tauHI" => tauHI,
@@ -71,9 +73,12 @@ function ProcessHI(simu, LOS;
 
     if phase_cubes
         info_user("Solving radiative transfer per phase (CNM, LNM, WNM)")
-        TbC, TbtC, tauC = HIcube(nCNM, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm)
-        TbL, TbtL, tauL = HIcube(nLNM, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm)
-        TbW, TbtW, tauW = HIcube(nWNM, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm)
+        TbC, TbtC, tauC = HIcube(nCNM, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm,
+                                 progress = make_progress("CNM", nx))
+        TbL, TbtL, tauL = HIcube(nLNM, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm,
+                                 progress = make_progress("LNM", nx))
+        TbW, TbtW, tauW = HIcube(nWNM, VLOS, T, velArray, PixelLength_cm; mu = mu, therm = therm,
+                                 progress = make_progress("WNM", nx))
         merge!(cubes, Dict(
             "TbCNM" => TbC, "TbthinCNM" => TbtC, "tauCNM" => tauC,
             "TbLNM" => TbL, "TbthinLNM" => TbtL, "tauLNM" => tauL,

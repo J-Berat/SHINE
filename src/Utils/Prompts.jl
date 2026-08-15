@@ -49,27 +49,47 @@ is_yes_no(answer) = uppercase(strip(String(answer))) in ("Y", "N")
 
 # --- public API ------------------------------------------------------------
 
-function ask_user(prompt::String, default::Float64)
+function ask_user(
+    prompt::String,
+    default::Float64;
+    validate::Function = _ -> true,
+    error_message::AbstractString = "Value out of range. Please try again.",
+)
     while true
         _print_prompt(prompt, default)
         val = strip(readline())
         isempty(val) && return default
 
         parsed = tryparse(Float64, val)
-        parsed === nothing && warn_user("Please enter a numeric value (e.g., 1.0) or press Enter to use the default.")
-        parsed !== nothing && return parsed
+        if parsed === nothing
+            warn_user("Please enter a numeric value (e.g., 1.0) or press Enter to use the default.")
+        elseif !validate(parsed)
+            !isempty(error_message) && warn_user(error_message)
+        else
+            return parsed
+        end
     end
 end
 
-function ask_user(prompt::String, default::Int64)
+function ask_user(
+    prompt::String,
+    default::Int64;
+    validate::Function = _ -> true,
+    error_message::AbstractString = "Value out of range. Please try again.",
+)
     while true
         _print_prompt(prompt, default)
         val = strip(readline())
         isempty(val) && return default
 
         parsed = tryparse(Int, val)
-        parsed === nothing && warn_user("Please enter an integer value (e.g., 1 or 3) or press Enter to use the default.")
-        parsed !== nothing && return parsed
+        if parsed === nothing
+            warn_user("Please enter an integer value (e.g., 1 or 3) or press Enter to use the default.")
+        elseif !validate(parsed)
+            !isempty(error_message) && warn_user(error_message)
+        else
+            return parsed
+        end
     end
 end
 

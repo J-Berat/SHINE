@@ -16,6 +16,7 @@ using TOML
 include(joinpath("Utils", "Prompts.jl"))
 include(joinpath("Utils", "ArrayMath.jl"))
 include(joinpath("Utils", "AtomicWrite.jl"))
+include(joinpath("Utils", "Progress.jl"))
 
 # --- File I/O --------------------------------------------------------------
 include(joinpath("FileIO", "SimulationDiscovery.jl"))

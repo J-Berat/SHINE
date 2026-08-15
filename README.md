@@ -1,5 +1,7 @@
 # SHINE
 
+[![CI](https://github.com/j-berat/SHINE/actions/workflows/CI.yml/badge.svg)](https://github.com/j-berat/SHINE/actions/workflows/CI.yml)
+
 **SHINE** (*Synthetic H I Neutral Emission*) is a Julia toolkit for turning
 magnetohydrodynamic (MHD) simulation cubes into synthetic **21-cm neutral
 hydrogen** observations. It is the HI counterpart of
@@ -67,6 +69,10 @@ or simply:
 ```bash
 julia --startup-file=no --project src/SHINE_cli.jl --demo
 ```
+
+The radiative transfer is threaded over sky columns — start Julia with
+`-t auto` to use every core — and draws a progress bar when it runs on a
+terminal. Set `SHINE_PROGRESS=0` to silence the bar in batch jobs.
 
 ## Outputs
 

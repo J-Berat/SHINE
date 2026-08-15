@@ -21,6 +21,8 @@
   "tile": 128,
   "do_filter": false,
   "kernel_size_hi": 2.0,
+  "beam_fwhm_arcmin": 0.0,
+  "distance_pc": 0.0,
   "add_noise": false,
   "sigma": 0.0,
   "rng_seed": 0,

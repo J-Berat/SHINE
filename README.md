@@ -18,7 +18,10 @@ synchrotron emission) and shares the same interactive command-line experience.
 - Compute **velocity moment** maps (integrated intensity, centroid, dispersion).
 - Compute mass- and volume-weighted **gas-fraction** maps.
 - Estimate the **CNM fraction from the Fourier spectrum** (Marchal et al. 2024).
-- Apply an optional **Gaussian beam** and add optional **Gaussian noise**.
+- Apply an optional **Gaussian beam** — either as a σ in pixels or as a physical
+  **FWHM in arcminutes** at a given source distance, so a real instrument can be
+  reproduced (Arecibo ≈ 3.5′, GBT ≈ 9′ at 21 cm) — and add optional
+  **Gaussian noise**.
 - Overlay the **thermal-equilibrium curve** (Wolfire et al. 2003) on a
   **phase diagram** (n–P 2D histogram).
 - Run interactively, from a JSON configuration, or through the CLI.
@@ -73,6 +76,22 @@ julia --startup-file=no --project src/SHINE_cli.jl --demo
 The radiative transfer is threaded over sky columns — start Julia with
 `-t auto` to use every core — and draws a progress bar when it runs on a
 terminal. Set `SHINE_PROGRESS=0` to silence the bar in batch jobs.
+
+### Beam
+
+Set `beam_fwhm_arcmin` together with `distance_pc` to smooth with a real
+telescope beam; the distance is what converts the box's parsec-sized pixels into
+an angular scale. Leaving `beam_fwhm_arcmin` at `0` falls back to
+`kernel_size_hi`, the σ in pixels. Smoothed products are written under
+`LOS/HI/filtered/` and carry the resolution in their header (`BMAJ`, `BMIN`,
+`BPA` in degrees, plus `PIXSCALE` in arcmin and `DISTANCE` in pc), so they load
+into astropy or CASA with the beam already attached.
+
+```julia
+ProcessHI(simu, "z"; TCNM = 200, TWNM = 2000, velArray = vel,
+          PixelLength_cm = plen,
+          do_filter = true, beam_fwhm_arcmin = 3.5, distance_pc = 150)
+```
 
 ## Outputs
 

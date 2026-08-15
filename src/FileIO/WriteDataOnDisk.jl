@@ -24,6 +24,18 @@ const _BUNIT = Dict(
 
 bunit_of(name) = get(_BUNIT, name, "")
 
+# Comments attached to the provenance / beam keywords injected via `metadata`.
+const _METADATA_COMMENTS = Dict(
+    "SHINEVER" => "SHINE version",
+    "SHINEGIT" => "SHINE git revision",
+    "BMAJ" => "Beam major axis [deg]",
+    "BMIN" => "Beam minor axis [deg]",
+    "BPA" => "Beam position angle [deg]",
+    "BMAJPIX" => "Beam FWHM [pixels]",
+    "PIXSCALE" => "Sky-plane pixel scale [arcmin]",
+    "DISTANCE" => "Assumed source distance [pc]",
+)
+
 function _base_header(name, ndim; metadata = nothing)
     keys = ["BUNIT", "ORIGIN", "PRODUCT"]
     vals = Any[bunit_of(name), "SHINE", name]
@@ -36,9 +48,10 @@ function _base_header(name, ndim; metadata = nothing)
 
     if metadata isa AbstractDict
         for (k, v) in metadata
-            push!(keys, uppercase(String(k))[1:min(8, end)])
+            key = uppercase(String(k))[1:min(8, end)]
+            push!(keys, key)
             push!(vals, v isa AbstractString ? v : v)
-            push!(coms, "")
+            push!(coms, get(_METADATA_COMMENTS, key, ""))
         end
     end
 

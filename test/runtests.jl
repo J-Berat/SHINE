@@ -135,6 +135,104 @@ using Statistics: var
         end
     end
 
+    @testset "physical beam geometry" begin
+        # 0.2 pc pixel at 100 pc: theta = 0.002 rad = 6.8755 arcmin.
+        @test pixel_scale_arcmin(0.2, 100.0) ≈ rad2deg(0.002) * 60
+        @test pixel_scale_arcmin(0.2, 200.0) ≈ pixel_scale_arcmin(0.1, 100.0)
+        @test_throws ArgumentError pixel_scale_arcmin(0.0, 100.0)
+        @test_throws ArgumentError pixel_scale_arcmin(0.2, 0.0)
+
+        # A FWHM of exactly one pixel gives sigma = 1/(2 sqrt(2 ln 2)) pixels.
+        @test beam_sigma_pix(1.0, 1.0) ≈ 1 / (2 * sqrt(2 * log(2)))
+        @test beam_sigma_pix(4.0, 1.0) ≈ 4 * beam_sigma_pix(1.0, 1.0)
+        # Only the FWHM/pixel ratio matters.
+        @test beam_sigma_pix(6.0, 2.0) ≈ beam_sigma_pix(3.0, 1.0)
+        @test_throws ArgumentError beam_sigma_pix(0.0, 1.0)
+        @test_throws ArgumentError beam_sigma_pix(1.0, 0.0)
+    end
+
+    @testset "resolve_beam picks the right specification" begin
+        plen = 0.2 * Shine.PC_TO_CM          # 0.2 pc pixels
+
+        # Physical beam: 20 arcmin at 100 pc, where a pixel is 6.8755 arcmin.
+        b = resolve_beam(plen; beam_fwhm_arcmin = 20.0, distance_pc = 100.0)
+        @test b.fwhm_arcmin ≈ 20.0
+        @test b.pixel_arcmin ≈ pixel_scale_arcmin(0.2, 100.0)
+        @test b.sigma_pix ≈ beam_sigma_pix(20.0, b.pixel_arcmin)
+        @test b.distance_pc ≈ 100.0
+
+        # Pixel beam without a distance: no physical counterpart is invented.
+        p = resolve_beam(plen; kernel_size_hi = 2.5)
+        @test p.sigma_pix ≈ 2.5
+        @test p.pixel_arcmin === nothing
+        @test p.fwhm_arcmin === nothing
+
+        # Pixel beam *with* a distance: the FWHM it corresponds to is filled in,
+        # and feeding it back reproduces the same sigma.
+        q = resolve_beam(plen; kernel_size_hi = 2.5, distance_pc = 100.0)
+        @test q.fwhm_arcmin !== nothing
+        @test resolve_beam(plen; beam_fwhm_arcmin = q.fwhm_arcmin,
+                           distance_pc = 100.0).sigma_pix ≈ 2.5
+
+        # A FWHM is meaningless without a distance, and the inputs are checked.
+        @test_throws ArgumentError resolve_beam(plen; beam_fwhm_arcmin = 9.0)
+        @test_throws ArgumentError resolve_beam(plen; kernel_size_hi = 0.0)
+        @test_throws ArgumentError resolve_beam(plen; distance_pc = -1.0)
+        @test_throws ArgumentError resolve_beam(0.0; kernel_size_hi = 2.0)
+
+        # BMAJ/BMIN are degrees in the FITS convention; BMAJPIX is the FWHM in
+        # pixels and survives even when the beam is only known in pixels.
+        meta = Shine.beam_metadata(Dict("SHINEVER" => "0.1.0"), b)
+        @test meta["SHINEVER"] == "0.1.0"
+        @test meta["BMAJ"] ≈ 20.0 / 60
+        @test meta["BMIN"] ≈ meta["BMAJ"]
+        @test meta["BPA"] == 0.0
+        @test meta["DISTANCE"] ≈ 100.0
+        @test Shine.beam_metadata(nothing, p)["BMAJPIX"] ≈ 2.5 / (1 / (2 * sqrt(2 * log(2))))
+        @test !haskey(Shine.beam_metadata(nothing, p), "BMAJ")
+    end
+
+    @testset "the beam kernel is 2D and isotropic" begin
+        img = zeros(65, 65)
+        img[33, 33] = 1.0
+        sm = LowPass(img, gaussian_beam(3.0))
+
+        # A 1D kernel would leave these exactly zero — it would only smooth
+        # along the first axis.
+        @test sm[33, 30] > 0
+        @test sm[30, 33] > 0
+        @test sm ≈ permutedims(sm)                      # isotropic
+        @test sum(sm) ≈ 1.0 rtol = 1e-6                 # flux conserving
+        # A wider beam spreads the same flux further, so the peak drops.
+        @test maximum(LowPass(img, gaussian_beam(5.0))) <
+              maximum(LowPass(img, gaussian_beam(2.0)))
+    end
+
+    @testset "a physical beam propagates into the FITS headers" begin
+        mktempdir() do dir
+            demo = make_demo_data(joinpath(dir, "demo"); npix = 8)
+            cfg = Shine.JSON.parsefile(demo.config_path)
+            vel = velocity_array(cfg["velstart"], cfg["velend"], cfg["dvel"])
+            plen = pixel_length_cm(cfg["BoxLength_pc"], Int(cfg["BoxLength_pix"]))
+            out = ProcessHI(demo.simu_dir, "z";
+                            TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = vel,
+                            PixelLength_cm = plen, phase_cubes = false,
+                            compute_fractions = false, compute_moments = false,
+                            compute_fftcnm = false,
+                            # 20 pc / 8 pix = 2.5 pc pixels; at 1720 pc that is
+                            # ~5 arcmin per pixel, so a 15 arcmin beam is
+                            # properly sampled (sigma ~ 1.3 pix).
+                            do_filter = true, beam_fwhm_arcmin = 15.0, distance_pc = 1720.0)
+            @test basename(out) == "filtered"
+            hdr = Shine.FITSIO.FITS(joinpath(out, "TbHI.fits")) do f
+                Shine.FITSIO.read_header(f[1])
+            end
+            @test hdr["BMAJ"] ≈ 15.0 / 60
+            @test hdr["DISTANCE"] ≈ 1720.0
+            @test hdr["PIXSCALE"] ≈ pixel_scale_arcmin(20.0 / 8, 1720.0)
+        end
+    end
+
     @testset "tiled run writes mass *and* volume fraction maps" begin
         mktempdir() do dir
             demo = make_demo_data(joinpath(dir, "demo"); npix = 6)

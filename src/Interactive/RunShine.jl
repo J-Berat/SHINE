@@ -44,6 +44,7 @@ function write_summary_log(base_dir, chosen_simu, chosen_LOS, elapsed, cfg; conf
                   "velstart", "velend", "dvel", "TCNM", "TWNM", "phase_cubes", "compute_fractions",
                   "compute_moments", "compute_fftcnm", "compute_stats",
                   "use_tiles", "tile", "do_filter", "kernel_size_hi",
+                  "beam_fwhm_arcmin", "distance_pc",
                   "add_noise", "sigma", "rng_seed", "mu", "therm")
             haskey(cfg, k) && println(io, "$k: $(cfg[k])")
         end
@@ -204,7 +205,41 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     section("Angular smoothing")
     do_filter = yesno(ask_user("Apply Gaussian beam smoothing? (Y/N)", get(config, "do_filter", false) ? "Y" : "N"; validate = is_yes_no))
     config["do_filter"] = do_filter
-    config["kernel_size_hi"] = do_filter ? ask_user("Gaussian beam sigma (pixels)", Float64(get(config, "kernel_size_hi", 2.0))) : get(config, "kernel_size_hi", 2.0)
+    # Seed the three beam keys from the previous config so that a replayed
+    # configuration keeps the beam it described even when smoothing is off.
+    config["kernel_size_hi"] = Float64(get(config, "kernel_size_hi", 2.0))
+    config["beam_fwhm_arcmin"] = Float64(get(config, "beam_fwhm_arcmin", 0.0))
+    config["distance_pc"] = Float64(get(config, "distance_pc", 0.0))
+
+    if do_filter
+        physical = yesno(ask_user("Specify the beam physically, as a FWHM in arcmin at a given distance? (Y/N)",
+                                  config["beam_fwhm_arcmin"] > 0 ? "Y" : "N"; validate = is_yes_no))
+        if physical
+            config["beam_fwhm_arcmin"] =
+                ask_user("Beam FWHM (arcmin; Arecibo ~3.5, GBT ~9 at 21 cm)",
+                         config["beam_fwhm_arcmin"] > 0 ? config["beam_fwhm_arcmin"] : 3.5;
+                         validate = x -> x > 0,
+                         error_message = "The beam FWHM must be strictly positive.")
+            config["distance_pc"] =
+                ask_user("Distance to the simulated region (pc)",
+                         config["distance_pc"] > 0 ? config["distance_pc"] : 100.0;
+                         validate = x -> x > 0,
+                         error_message = "The distance must be strictly positive.")
+            # Echo the resulting sampling so an unusable beam shows up here and
+            # not three hours into the run.
+            dx_pc = Float64(config["BoxLength_pc"]) / Int(config["BoxLength_pix"])
+            pix_arcmin = pixel_scale_arcmin(dx_pc, config["distance_pc"])
+            sig = beam_sigma_pix(config["beam_fwhm_arcmin"], pix_arcmin)
+            info_user("Pixel scale $(round(pix_arcmin, digits = 4)) arcmin → beam σ = $(round(sig, digits = 3)) pix")
+            sig < 0.5 && warn_user("That beam is narrower than the pixel grid; consider a larger FWHM or a closer distance.")
+        else
+            config["beam_fwhm_arcmin"] = 0.0
+            config["kernel_size_hi"] =
+                ask_user("Gaussian beam sigma (pixels)", config["kernel_size_hi"];
+                         validate = x -> x > 0,
+                         error_message = "The beam sigma must be strictly positive.")
+        end
+    end
 
     # 9. Noise --------------------------------------------------------------
     section("Noise")
@@ -284,6 +319,8 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
                           compute_stats = get(cfg, "compute_stats", false),
                           do_filter = get(cfg, "do_filter", false),
                           kernel_size_hi = get(cfg, "kernel_size_hi", 2.0),
+                          beam_fwhm_arcmin = get(cfg, "beam_fwhm_arcmin", 0.0),
+                          distance_pc = get(cfg, "distance_pc", 0.0),
                           add_noise = get(cfg, "add_noise", false), sigma = get(cfg, "sigma", 0.0),
                           rng = rng, mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
                           metadata = metadata)

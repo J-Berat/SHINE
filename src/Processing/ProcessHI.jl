@@ -17,7 +17,14 @@ output directory.
 - `compute_moments` (true): write velocity moment 0/1/2 maps of `TbHI`.
 - `compute_fftcnm` (false): write the Marchal FFT CNM tracer map.
 - `compute_stats` (false): write power-spectrum + structure-function of NHI/mom0.
-- `do_filter` (false)     : Gaussian-smooth every cube (`kernel_size_hi` = σ pix).
+- `do_filter` (false)     : Gaussian-smooth every cube with a single-dish beam.
+- `kernel_size_hi` (2.0)  : beam σ in **pixels** (used when no physical beam is
+                            given).
+- `beam_fwhm_arcmin` (0)  : beam FWHM in **arcmin**; overrides `kernel_size_hi`
+                            and requires `distance_pc`. This is how a real
+                            instrument is quoted (Arecibo ≈ 3.5′, GBT ≈ 9′).
+- `distance_pc` (0)       : distance to the simulated region [pc], which sets
+                            the angular scale of a pixel.
 - `add_noise` (false)     : add Gaussian noise of std `sigma` [K]; independent
                             realisation per cube, drawn from `rng`.
 - `mu`, `therm`           : passed to [`HIspectrum`](@ref).
@@ -30,6 +37,7 @@ function ProcessHI(simu, LOS;
                    compute_moments::Bool = true, compute_fftcnm::Bool = false,
                    compute_stats::Bool = false,
                    do_filter::Bool = false, kernel_size_hi::Real = 2.0,
+                   beam_fwhm_arcmin::Real = 0.0, distance_pc::Real = 0.0,
                    add_noise::Bool = false, sigma::Real = 0.0, rng = Random.default_rng(),
                    mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
 
@@ -88,10 +96,14 @@ function ProcessHI(simu, LOS;
 
     # --- optional angular smoothing ---------------------------------------
     if do_filter
-        info_user("Applying Gaussian beam (σ = $(kernel_size_hi) pix)")
+        beam = resolve_beam(PixelLength_cm; kernel_size_hi = kernel_size_hi,
+                            beam_fwhm_arcmin = beam_fwhm_arcmin, distance_pc = distance_pc)
+        info_user("Applying Gaussian beam ($(beam_description(beam)))")
         for (name, cube) in cubes
-            startswith(name, "tau") || smooth_cube!(cube, kernel_size_hi)  # keep τ un-smoothed
+            startswith(name, "tau") || smooth_cube!(cube, beam.sigma_pix)  # keep τ un-smoothed
         end
+        # Everything written from here on is at the beam resolution, so record it.
+        metadata = beam_metadata(metadata, beam)
         resultspath = joinpath(resultspath, "filtered")
         mkpath(resultspath)
     end

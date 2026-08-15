@@ -27,6 +27,10 @@ output directory.
                             the angular scale of a pixel.
 - `add_noise` (false)     : add Gaussian noise of std `sigma` [K]; independent
                             realisation per cube, drawn from `rng`.
+- `correlated_noise`(true): when a beam is applied, filter the noise through it
+                            so the map's noise is correlated over a beam width,
+                            as in a real observation. Set `false` for white
+                            noise (noise added after gridding).
 - `mu`, `therm`           : passed to [`HIspectrum`](@ref).
 - `metadata`              : extra FITS header keywords.
 """
@@ -38,7 +42,8 @@ function ProcessHI(simu, LOS;
                    compute_stats::Bool = false,
                    do_filter::Bool = false, kernel_size_hi::Real = 2.0,
                    beam_fwhm_arcmin::Real = 0.0, distance_pc::Real = 0.0,
-                   add_noise::Bool = false, sigma::Real = 0.0, rng = Random.default_rng(),
+                   add_noise::Bool = false, sigma::Real = 0.0, correlated_noise::Bool = true,
+                   rng = Random.default_rng(),
                    mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
 
     printstyled("\n▶ Processing HI for LOS $(LOS): $(simu)\n"; color = :cyan, bold = true)
@@ -95,6 +100,7 @@ function ProcessHI(simu, LOS;
     end
 
     # --- optional angular smoothing ---------------------------------------
+    beam = nothing
     if do_filter
         beam = resolve_beam(PixelLength_cm; kernel_size_hi = kernel_size_hi,
                             beam_fwhm_arcmin = beam_fwhm_arcmin, distance_pc = distance_pc)
@@ -110,13 +116,21 @@ function ProcessHI(simu, LOS;
 
     # --- optional noise (independent realisation per brightness cube) ------
     if add_noise
-        info_user("Adding Gaussian noise (σ = $(sigma) K)")
+        # Receiver noise enters ahead of the beam, so once a beam has been
+        # applied the noise in the map is correlated over a beam width rather
+        # than independent per pixel. `correlated_noise = false` falls back to
+        # white noise, the right model for noise added after gridding.
+        noise_sigma_pix = (beam !== nothing && correlated_noise) ? beam.sigma_pix : nothing
+        info_user(noise_sigma_pix === nothing ?
+                  "Adding white Gaussian noise (σ = $(sigma) K)" :
+                  "Adding beam-correlated Gaussian noise (σ = $(sigma) K)")
         for (name, cube) in cubes
             startswith(name, "Tb") || continue      # noise only on brightness cubes
-            for k in axes(cube, 3)
-                @views cube[:, :, k] .+= rand(rng, Normal(0.0, sigma), size(cube, 1), size(cube, 2))
-            end
+            add_noise!(cube, sigma, rng; sigma_pix = noise_sigma_pix)
         end
+        metadata = merge_metadata(metadata, Dict(
+            "NOISE" => float(sigma),
+            "NOISETYP" => noise_sigma_pix === nothing ? "white" : "beam-correlated"))
     end
 
     # --- write cubes -------------------------------------------------------

@@ -39,6 +39,7 @@ include(joinpath("Diagnostics", "SpatialStatistics.jl"))
 
 # --- Processing ------------------------------------------------------------
 include(joinpath("Processing", "Filter.jl"))
+include(joinpath("Processing", "Noise.jl"))
 include(joinpath("Processing", "Velocity.jl"))
 include(joinpath("Processing", "ProcessHI.jl"))
 include(joinpath("Processing", "TiledProcessing.jl"))
@@ -64,6 +65,7 @@ export run_shine, SHINE_from_config, make_demo_data,
        fft_cnm, fft_cnm_map,
        LowPass, smooth_cube!, gaussian_beam, velocity_array, pixel_length_cm,
        pixel_scale_arcmin, beam_sigma_pix, resolve_beam,
+       add_noise!, beam_noise_gain,
        ProcessHI, ProcessHI_tiled, phase_diagram,
        power_spectrum, structure_function, write_spatial_stats,
        intLOS, maxLOS, sigmaLOS, logindgen

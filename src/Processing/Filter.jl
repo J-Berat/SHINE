@@ -138,9 +138,7 @@ function beam_metadata(metadata, beam)
         extra["BMIN"] = beam.fwhm_arcmin / 60      # circular beam
         extra["BPA"] = 0.0
     end
-    base = metadata isa AbstractDict ?
-        Dict{String,Any}(String(k) => v for (k, v) in metadata) : Dict{String,Any}()
-    return merge(base, extra)
+    return merge_metadata(metadata, extra)
 end
 
 """

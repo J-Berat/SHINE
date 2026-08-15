@@ -25,6 +25,7 @@
   "distance_pc": 0.0,
   "add_noise": false,
   "sigma": 0.0,
+  "correlated_noise": true,
   "rng_seed": 0,
   "mu": 1.0,
   "therm": 0.0

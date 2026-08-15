@@ -1,7 +1,8 @@
 using Test
 using Shine
 using HDF5: h5open
-using Statistics: var
+using Statistics: var, std, cor
+using Random: MersenneTwister
 
 @testset "SHINE" begin
 
@@ -230,6 +231,86 @@ using Statistics: var
             @test hdr["BMAJ"] ≈ 15.0 / 60
             @test hdr["DISTANCE"] ≈ 1720.0
             @test hdr["PIXSCALE"] ≈ pixel_scale_arcmin(20.0 / 8, 1720.0)
+        end
+    end
+
+    @testset "beam noise gain matches what the beam does to white noise" begin
+        # Smoothing can only reduce the scatter, and the wider the beam the more.
+        @test 0 < beam_noise_gain(2.0) < 1
+        @test beam_noise_gain(4.0) < beam_noise_gain(2.0)
+        @test_throws ArgumentError beam_noise_gain(0.0)
+
+        # The predicted gain has to agree with the measured one, whatever the
+        # kernel's internal representation.
+        white = randn(MersenneTwister(7), 256, 256)
+        for s in (1.5, 3.0)
+            measured = std(LowPass(white, gaussian_beam(s))) / std(white)
+            @test measured ≈ beam_noise_gain(s) rtol = 0.15
+        end
+    end
+
+    @testset "beam-correlated noise" begin
+        # Correlation between neighbours along the first axis: ~0 for white
+        # noise, close to 1 for a field smoothed over several pixels.
+        lag1(m) = cor(vec(m[1:end-1, :]), vec(m[2:end, :]))
+        nx = ny = 160
+
+        white = zeros(nx, ny, 2)
+        add_noise!(white, 0.5, MersenneTwister(1))
+        @test std(white) ≈ 0.5 rtol = 0.1
+        @test abs(lag1(white[:, :, 1])) < 0.1
+
+        corr = zeros(nx, ny, 2)
+        add_noise!(corr, 0.5, MersenneTwister(1); sigma_pix = 3.0)
+        # The requested sigma must survive the renormalisation ...
+        @test std(corr) ≈ 0.5 rtol = 0.15
+        # ... while neighbouring pixels are now far from independent, which is
+        # the whole point: white noise under-states the scatter on beam scales.
+        @test lag1(corr[:, :, 1]) > 0.8
+        # Channels stay independent realisations of each other. The bound is
+        # loose because correlated fields have few independent patches, so the
+        # estimator itself is noisy — a genuinely shared realisation would
+        # give ~1, not 0.2.
+        @test abs(cor(vec(corr[:, :, 1]), vec(corr[:, :, 2]))) < 0.25
+
+        # Same seed, same cube.
+        again = zeros(nx, ny, 2)
+        add_noise!(again, 0.5, MersenneTwister(1); sigma_pix = 3.0)
+        @test again == corr
+
+        # A zero sigma is a no-op, and a negative one is rejected.
+        untouched = zeros(4, 4, 2)
+        @test add_noise!(untouched, 0.0, MersenneTwister(1)) == zeros(4, 4, 2)
+        @test_throws ArgumentError add_noise!(untouched, -1.0, MersenneTwister(1))
+    end
+
+    @testset "noise model is recorded in the FITS header" begin
+        mktempdir() do dir
+            demo = make_demo_data(joinpath(dir, "demo"); npix = 8)
+            cfg = Shine.JSON.parsefile(demo.config_path)
+            vel = velocity_array(cfg["velstart"], cfg["velend"], cfg["dvel"])
+            plen = pixel_length_cm(cfg["BoxLength_pc"], Int(cfg["BoxLength_pix"]))
+            base = (; TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = vel,
+                      PixelLength_cm = plen, phase_cubes = false,
+                      compute_fractions = false, compute_moments = false,
+                      compute_fftcnm = false,
+                      add_noise = true, sigma = 0.2, rng = MersenneTwister(3))
+
+            noisetype(path) = Shine.FITSIO.FITS(path) do f
+                Shine.FITSIO.read_header(f[1])["NOISETYP"]
+            end
+
+            out = ProcessHI(demo.simu_dir, "z"; do_filter = true, kernel_size_hi = 2.0, base...)
+            @test noisetype(joinpath(out, "TbHI.fits")) == "beam-correlated"
+
+            out = ProcessHI(demo.simu_dir, "z"; do_filter = true, kernel_size_hi = 2.0,
+                            correlated_noise = false, base...)
+            @test noisetype(joinpath(out, "TbHI.fits")) == "white"
+
+            # No beam, nothing to correlate with: the noise stays white even
+            # though correlated_noise defaults to true.
+            out = ProcessHI(demo.simu_dir, "z"; base...)
+            @test noisetype(joinpath(out, "TbHI.fits")) == "white"
         end
     end
 

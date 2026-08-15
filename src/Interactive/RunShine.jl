@@ -45,7 +45,7 @@ function write_summary_log(base_dir, chosen_simu, chosen_LOS, elapsed, cfg; conf
                   "compute_moments", "compute_fftcnm", "compute_stats",
                   "use_tiles", "tile", "do_filter", "kernel_size_hi",
                   "beam_fwhm_arcmin", "distance_pc",
-                  "add_noise", "sigma", "rng_seed", "mu", "therm")
+                  "add_noise", "sigma", "correlated_noise", "rng_seed", "mu", "therm")
             haskey(cfg, k) && println(io, "$k: $(cfg[k])")
         end
     end
@@ -246,6 +246,12 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     add_noise = yesno(ask_user("Add Gaussian noise to brightness cubes? (Y/N)", get(config, "add_noise", false) ? "Y" : "N"; validate = is_yes_no))
     config["add_noise"] = add_noise
     config["sigma"] = add_noise ? ask_user("Noise standard deviation (K)", Float64(get(config, "sigma", 0.1))) : get(config, "sigma", 0.0)
+    # Only meaningful alongside a beam: without one there is nothing to
+    # correlate the noise with and it stays white either way.
+    config["correlated_noise"] = (add_noise && do_filter) ?
+        yesno(ask_user("Correlate the noise with the beam (as in a real map)? (Y/N)",
+                       get(config, "correlated_noise", true) ? "Y" : "N"; validate = is_yes_no)) :
+        get(config, "correlated_noise", true)
     config["rng_seed"] = add_noise ? ask_user("Random seed (integer; 0 for a random seed)", Int(get(config, "rng_seed", 1234))) : get(config, "rng_seed", 0)
 
     # 9b. Performance / memory ---------------------------------------------
@@ -322,6 +328,7 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
                           beam_fwhm_arcmin = get(cfg, "beam_fwhm_arcmin", 0.0),
                           distance_pc = get(cfg, "distance_pc", 0.0),
                           add_noise = get(cfg, "add_noise", false), sigma = get(cfg, "sigma", 0.0),
+                          correlated_noise = get(cfg, "correlated_noise", true),
                           rng = rng, mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
                           metadata = metadata)
             end

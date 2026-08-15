@@ -34,7 +34,24 @@ const _METADATA_COMMENTS = Dict(
     "BMAJPIX" => "Beam FWHM [pixels]",
     "PIXSCALE" => "Sky-plane pixel scale [arcmin]",
     "DISTANCE" => "Assumed source distance [pc]",
+    "NOISE" => "Noise standard deviation [K]",
+    "NOISETYP" => "Noise spatial correlation",
 )
+
+"""
+    merge_metadata(metadata, extra) -> Dict{String,Any}
+
+Merge the `extra` FITS keywords into `metadata`, which may be `nothing`.
+Returns a fresh dictionary with `String` keys, leaving `metadata` untouched.
+"""
+function merge_metadata(metadata, extra::AbstractDict)
+    merged = metadata isa AbstractDict ?
+        Dict{String,Any}(String(k) => v for (k, v) in metadata) : Dict{String,Any}()
+    for (k, v) in extra
+        merged[String(k)] = v
+    end
+    return merged
+end
 
 function _base_header(name, ndim; metadata = nothing)
     keys = ["BUNIT", "ORIGIN", "PRODUCT"]

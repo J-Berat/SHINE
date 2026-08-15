@@ -93,6 +93,15 @@ ProcessHI(simu, "z"; TCNM = 200, TWNM = 2000, velArray = vel,
           do_filter = true, beam_fwhm_arcmin = 3.5, distance_pc = 150)
 ```
 
+### Noise
+
+Receiver noise enters ahead of the beam, so in a smoothed map it is correlated
+over a beam width rather than independent per pixel. When a beam is applied the
+noise is therefore drawn white, passed through that same beam and renormalised
+so the map keeps the requested `sigma` — set `correlated_noise = false` for
+white noise instead (the right model for noise added after gridding). Either
+way the choice is recorded as `NOISETYP` in the header.
+
 ## Outputs
 
 For each simulation and line of sight, in `<simu>/<LOS>/HI/`:

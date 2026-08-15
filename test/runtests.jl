@@ -192,13 +192,13 @@ using Statistics: var
         @test !haskey(Shine.beam_metadata(nothing, p), "BMAJ")
     end
 
-    @testset "the beam kernel is 2D and isotropic" begin
+    @testset "the beam smooths both sky axes, isotropically" begin
         img = zeros(65, 65)
         img[33, 33] = 1.0
         sm = LowPass(img, gaussian_beam(3.0))
 
-        # A 1D kernel would leave these exactly zero — it would only smooth
-        # along the first axis.
+        # A single-dish beam is a 2D angular response: a point source has to
+        # spread along both sky axes, by the same amount.
         @test sm[33, 30] > 0
         @test sm[30, 33] > 0
         @test sm ≈ permutedims(sm)                      # isotropic

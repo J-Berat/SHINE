@@ -30,13 +30,9 @@ LowPass(img::AbstractMatrix, kernel) = imfilter(img, kernel, "replicate")
 """
     gaussian_beam(sigma_pix) -> kernel
 
-Isotropic 2D Gaussian smoothing kernel of standard deviation `sigma_pix` pixels.
-
-The σ is passed as a 2-tuple so the kernel is explicitly two-dimensional, rather
-than leaving its dimensionality to `Kernel.gaussian`'s scalar form; a beam that
-only smoothed along the first axis would not be a beam at all.
+Isotropic Gaussian smoothing kernel of standard deviation `sigma_pix` pixels.
 """
-gaussian_beam(sigma_pix::Real) = Kernel.gaussian((float(sigma_pix), float(sigma_pix)))
+gaussian_beam(sigma_pix::Real) = Kernel.gaussian(sigma_pix)
 
 """
     pixel_scale_arcmin(dx_pc, distance_pc) -> Float64

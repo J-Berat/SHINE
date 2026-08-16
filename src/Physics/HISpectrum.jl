@@ -37,40 +37,100 @@ function HIspectrum(n, v, T, velvec, dz; mu::Real = 1.0, therm::Real = 0.0)
     mu > 0 || throw(ArgumentError("mu must be positive (got $mu)."))
     therm >= 0 || throw(ArgumentError("therm must be non-negative (got $therm)."))
 
-    # Thermal velocity dispersion [km/s]. sqrt(k T / (m mu)) with m in g and the
-    # 1e3 factor converting the SI Boltzmann constant to a km/s dispersion.
     nbvec = length(velvec)
     Tb = zeros(nbvec)
     Tb_thin = zeros(nbvec)
-    tau_in_front = zeros(nbvec)
+    tau = zeros(nbvec)
+    trans = ones(nbvec)
+    vel = _velocity_channels(velvec)
+
+    _HIspectrum!(Tb, Tb_thin, tau, trans, n, v, T, vel, dz, mu, therm,
+                 _uniform_velocity_grid(vel))
+    return Tb, Tb_thin, tau
+end
+
+# Gaussian line profiles are truncated at this many standard deviations. At 8σ
+# the neglected wing is exp(-32) ≈ 1e-14 of the profile peak — below the
+# rounding error of the accumulated sum — so the truncated result agrees with
+# the untruncated one to ~1e-15 relative while touching far fewer channels.
+const GAUSS_TRUNCATION_NSIG = 8.0
+
+"Velocity channels as a plain `Vector{Float64}`, avoiding repeated conversion."
+_velocity_channels(velvec) = collect(float.(velvec))
+_velocity_channels(velvec::Vector{Float64}) = velvec
+
+"""
+Describe `velvec` as `(v0, inv_dv)` when it is uniformly spaced, else `nothing`.
+
+A uniform grid lets the kernel jump straight to the channels a line profile can
+reach; on an irregular grid the kernel falls back to scanning every channel.
+"""
+function _uniform_velocity_grid(velvec)
+    nbvec = length(velvec)
+    nbvec >= 2 || return nothing
+    v0 = float(velvec[1])
+    dv = (float(velvec[end]) - v0) / (nbvec - 1)
+    (isfinite(dv) && dv != 0) || return nothing
+    tol = 1e-6 * abs(dv)
+    @inbounds for j in eachindex(velvec)
+        abs(float(velvec[j]) - (v0 + (j - 1) * dv)) <= tol || return nothing
+    end
+    return (v0, 1.0 / dv)
+end
+
+# Channels reachable by a Gaussian of width `sig` centred on `vk`, clamped to
+# `1:nbvec`. The float comparisons before `ceil`/`floor` keep a very wide
+# profile from overflowing the integer conversion.
+@inline function _channel_range(grid, vk, sig, nbvec)
+    grid === nothing && return 1:nbvec
+    v0, inv_dv = grid
+    centre = (vk - v0) * inv_dv + 1
+    half = GAUSS_TRUNCATION_NSIG * sig * abs(inv_dv)
+    lo = centre - half
+    hi = centre + half
+    jlo = lo <= 1 ? 1 : ceil(Int, lo)
+    jhi = hi >= nbvec ? nbvec : floor(Int, hi)
+    return jlo:jhi
+end
+
+@inline _sigma_los(T_k, mu, therm) =
+    therm > 0 ? float(therm) : sqrt(K_PLANCK * T_k / (1.0e3 * M_H * mu))
+
+# Allocation-free kernel shared by the spectrum and cube APIs. `Tb`, `Tb_thin`
+# and `tau` must be zero-initialised by the caller and `trans` set to one;
+# `trans` carries the foreground transmission exp(-tau_in_front) so the
+# attenuation costs a multiplication rather than a second exponential.
+function _HIspectrum!(Tb, Tb_thin, tau, trans, n, v, T, velvec, dz, mu, therm, grid)
+    nb = length(n)
+    nbvec = length(velvec)
 
     @inbounds for k in 1:nb
-        (n[k] <= 0 || T[k] <= 0) && continue
+        n_k = n[k]
+        T_k = T[k]
+        (n_k <= 0 || T_k <= 0) && continue
 
-        # Compute the broadening lazily to avoid allocating a LOS-sized array.
-        sig_therm = therm > 0 ? float(therm) : sqrt(K_PLANCK * T[k] / (1.0e3 * M_H * mu))
+        sig = _sigma_los(T_k, mu, therm)
+        inv_sig = 1.0 / sig
+        v_k = v[k]
+        # Everything constant along the channel loop, including the conversion
+        # from Gaussian profile to optical depth, is folded into one factor.
+        amp = inv_sig / sqrt(2π) * n_k * dz / (C_TAU * T_k)
 
-        inv_sig = 1.0 / sig_therm
-        norm = inv_sig / sqrt(2π)
-        Tk = T[k]
-
-        for j in 1:nbvec
-            # Gaussian velocity profile [ (km/s)^-1 ].
-            arg = (velvec[j] - v[k]) * inv_sig
-            G = exp(-0.5 * arg * arg) * norm
-            # Channel column density [cm^-2 (km/s)^-1] -> optical depth.
-            N = G * n[k] * dz
-            tau_k = N / (C_TAU * Tk)
+        for j in _channel_range(grid, v_k, sig, nbvec)
+            arg = (velvec[j] - v_k) * inv_sig
+            tau_k = exp(-0.5 * arg * arg) * amp
 
             # expm1 retains accuracy when tau_k is much smaller than machine
-            # precision, which is common in optically thin cells.
-            Tb[j] += Tk * (-expm1(-tau_k)) * exp(-tau_in_front[j])
-            Tb_thin[j] += tau_k * Tk
-            tau_in_front[j] += tau_k
+            # precision, which is common in optically thin cells; 1 + em is
+            # exp(-tau_k), reused to advance the transmission.
+            em = expm1(-tau_k)
+            Tb[j] += T_k * (-em) * trans[j]
+            Tb_thin[j] += tau_k * T_k
+            tau[j] += tau_k
+            trans[j] *= 1 + em
         end
     end
-
-    return Tb, Tb_thin, tau_in_front
+    return nothing
 end
 
 """
@@ -86,20 +146,36 @@ function HIspectrum_tb(n, v, T, velvec, dz; mu::Real = 1.0, therm::Real = 0.0)
     mu > 0 || throw(ArgumentError("mu must be positive (got $mu)."))
     therm >= 0 || throw(ArgumentError("therm must be non-negative (got $therm)."))
 
-    Tb = zeros(length(velvec))
-    tau_in_front = zeros(length(velvec))
+    vel = _velocity_channels(velvec)
+    Tb = zeros(length(vel))
+    trans = ones(length(vel))
+    _HIspectrum_tb!(Tb, trans, n, v, T, vel, dz, mu, therm, _uniform_velocity_grid(vel))
+    return Tb
+end
+
+# As above without the optically thin and optical-depth outputs; `trans` must be
+# set to one by the caller.
+function _HIspectrum_tb!(Tb, trans, n, v, T, velvec, dz, mu, therm, grid)
+    nb = length(n)
+    nbvec = length(velvec)
+
     @inbounds for k in 1:nb
-        (n[k] <= 0 || T[k] <= 0) && continue
-        sig_therm = therm > 0 ? float(therm) : sqrt(K_PLANCK * T[k] / (1.0e3 * M_H * mu))
-        inv_sig = 1.0 / sig_therm
-        norm = inv_sig / sqrt(2π)
-        Tk = T[k]
-        for j in eachindex(velvec)
-            arg = (velvec[j] - v[k]) * inv_sig
-            tau_k = exp(-0.5 * arg * arg) * norm * n[k] * dz / (C_TAU * Tk)
-            Tb[j] += Tk * (-expm1(-tau_k)) * exp(-tau_in_front[j])
-            tau_in_front[j] += tau_k
+        n_k = n[k]
+        T_k = T[k]
+        (n_k <= 0 || T_k <= 0) && continue
+
+        sig = _sigma_los(T_k, mu, therm)
+        inv_sig = 1.0 / sig
+        v_k = v[k]
+        amp = inv_sig / sqrt(2π) * n_k * dz / (C_TAU * T_k)
+
+        for j in _channel_range(grid, v_k, sig, nbvec)
+            arg = (velvec[j] - v_k) * inv_sig
+            tau_k = exp(-0.5 * arg * arg) * amp
+            em = expm1(-tau_k)
+            Tb[j] += T_k * (-em) * trans[j]
+            trans[j] *= 1 + em
         end
     end
-    return Tb
+    return nothing
 end

@@ -2,7 +2,6 @@ module Shine
 
 using Crayons
 using Dates
-using Distributions
 using FITSIO
 using JSON
 using LinearAlgebra
@@ -45,6 +44,7 @@ include(joinpath("Processing", "TiledProcessing.jl"))
 # --- Diagnostics: plotting (loads CairoMakie; kept last so the numerical core
 #     is usable even if a plotting backend is unavailable at include time) --
 include(joinpath("Diagnostics", "PhaseDiagram.jl"))
+include(joinpath("Diagnostics", "VelocityRGB.jl"))
 
 # --- Interactive workflow --------------------------------------------------
 include(joinpath("Interactive", "Logo.jl"))
@@ -59,10 +59,11 @@ export run_shine, SHINE_from_config, make_demo_data,
        GasFraction, VolumeFraction, GasFractionMap, VolumeFractionMap,
        ref_bistable, tequilibrium,
        QHI, UHI, thetaHI, PHI, PolarFractionHI,
-       moment0, moment1, moment2,
+       moment0, moment1, moment2, moments012,
        fft_cnm, fft_cnm_map,
        LowPass, smooth_cube!, velocity_array, pixel_length_cm,
        ProcessHI, ProcessHI_tiled, phase_diagram,
+       velocity_rgb_bands, velocity_rgb, write_velocity_rgb,
        power_spectrum, structure_function, write_spatial_stats,
        intLOS, maxLOS, sigmaLOS, logindgen
 

@@ -9,32 +9,36 @@ The three input cubes share the shape `(nx, ny, nz)` with the line of sight on
 the **third** axis (guaranteed by [`ReadSimulation`](@ref)). The returned cubes
 have shape `(nx, ny, nv)` with `nv = length(velArray)`.
 
-The pixel loop is multithreaded: start Julia with `-t auto` (or set
+Sky rows are distributed over threads: start Julia with `-t auto` (or set
 `JULIA_NUM_THREADS`) to use every core. Pass a `progress` callback taking the
-number of completed columns to drive a progress bar.
+number of completed sky rows to drive a progress bar; it is called from worker
+threads and must be thread-safe.
 """
 function HIcube(n, V, T, velArray, PixelLength_cm; mu::Real = 1.0, therm::Real = 0.0,
                 progress::Union{Nothing,Function} = nothing)
-    size(n) == size(V) == size(T) ||
-        throw(DimensionMismatch("n, V and T cubes must share the same shape."))
-    ndims(n) == 3 || throw(DimensionMismatch("n, V and T must be 3D cubes."))
+    _check_cube_inputs(n, V, T, PixelLength_cm, mu, therm)
 
     nx, ny = size(n, 1), size(n, 2)
-    nv = length(velArray)
-    velvec = collect(float.(velArray))
+    velvec = _velocity_channels(velArray)
+    grid = _uniform_velocity_grid(velvec)
+    nv = length(velvec)
 
     Tb = zeros(nx, ny, nv)
     Tb_thin = zeros(nx, ny, nv)
     tau = zeros(nx, ny, nv)
 
     done = Threads.Atomic{Int}(0)
-    Threads.@threads for x in 1:nx
-        for y in 1:ny
-            tb, tbthin, t = HIspectrum(@view(n[x, y, :]), @view(V[x, y, :]), @view(T[x, y, :]),
-                                       velvec, PixelLength_cm; mu = mu, therm = therm)
-            @views Tb[x, y, :] .= tb
-            @views Tb_thin[x, y, :] .= tbthin
-            @views tau[x, y, :] .= t
+    # Rows are the threaded axis so that the inner loop walks `x`, which is
+    # contiguous in memory: consecutive lines of sight then share cache lines.
+    Threads.@threads for y in 1:ny
+        # Allocated per row rather than per thread: negligible next to the row's
+        # work, and correct even if a task migrates between threads.
+        trans = Vector{Float64}(undef, nv)
+        for x in 1:nx
+            fill!(trans, 1.0)
+            _HIspectrum!(@view(Tb[x, y, :]), @view(Tb_thin[x, y, :]), @view(tau[x, y, :]),
+                         trans, @view(n[x, y, :]), @view(V[x, y, :]), @view(T[x, y, :]),
+                         velvec, PixelLength_cm, mu, therm, grid)
         end
         if progress !== nothing
             Threads.atomic_add!(done, 1)
@@ -54,19 +58,22 @@ cubes allocated by [`HIcube`](@ref).
 """
 function HIcube_tb(n, V, T, velArray, PixelLength_cm; mu::Real = 1.0, therm::Real = 0.0,
                    progress::Union{Nothing,Function} = nothing)
-    size(n) == size(V) == size(T) ||
-        throw(DimensionMismatch("n, V and T cubes must share the same shape."))
-    ndims(n) == 3 || throw(DimensionMismatch("n, V and T must be 3D cubes."))
+    _check_cube_inputs(n, V, T, PixelLength_cm, mu, therm)
 
     nx, ny = size(n, 1), size(n, 2)
-    velvec = collect(float.(velArray))
-    Tb = zeros(nx, ny, length(velvec))
+    velvec = _velocity_channels(velArray)
+    grid = _uniform_velocity_grid(velvec)
+    nv = length(velvec)
+
+    Tb = zeros(nx, ny, nv)
     done = Threads.Atomic{Int}(0)
-    Threads.@threads for x in 1:nx
-        for y in 1:ny
-            tb = HIspectrum_tb(@view(n[x, y, :]), @view(V[x, y, :]), @view(T[x, y, :]),
-                               velvec, PixelLength_cm; mu = mu, therm = therm)
-            @views Tb[x, y, :] .= tb
+    Threads.@threads for y in 1:ny
+        trans = Vector{Float64}(undef, nv)
+        for x in 1:nx
+            fill!(trans, 1.0)
+            _HIspectrum_tb!(@view(Tb[x, y, :]), trans,
+                            @view(n[x, y, :]), @view(V[x, y, :]), @view(T[x, y, :]),
+                            velvec, PixelLength_cm, mu, therm, grid)
         end
         if progress !== nothing
             Threads.atomic_add!(done, 1)
@@ -74,4 +81,14 @@ function HIcube_tb(n, V, T, velArray, PixelLength_cm; mu::Real = 1.0, therm::Rea
         end
     end
     return Tb
+end
+
+function _check_cube_inputs(n, V, T, PixelLength_cm, mu, therm)
+    size(n) == size(V) == size(T) ||
+        throw(DimensionMismatch("n, V and T cubes must share the same shape."))
+    ndims(n) == 3 || throw(DimensionMismatch("n, V and T must be 3D cubes."))
+    PixelLength_cm > 0 || throw(ArgumentError("PixelLength_cm must be positive (got $PixelLength_cm)."))
+    mu > 0 || throw(ArgumentError("mu must be positive (got $mu)."))
+    therm >= 0 || throw(ArgumentError("therm must be non-negative (got $therm)."))
+    return nothing
 end

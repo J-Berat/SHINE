@@ -18,6 +18,8 @@ function ProcessHI_tiled(simu, LOS;
                          tile::Integer = 128,
                          compute_fractions::Bool = true, compute_moments::Bool = true,
                          compute_fftcnm::Bool = false, compute_stats::Bool = false,
+                         compute_rgb::Bool = true, rgb_velocity_edges = nothing,
+                         rgb_percentile::Real = 99.5, rgb_stretch::Real = 3.0,
                          mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
 
     tile > 0 || error("tile must be a positive integer (got $tile).")
@@ -53,6 +55,7 @@ function ProcessHI_tiled(simu, LOS;
     mom1 = compute_moments ? zeros(nx, ny) : nothing
     mom2 = compute_moments ? zeros(nx, ny) : nothing
     fftc = compute_fftcnm ? zeros(nx, ny) : nothing
+    rgb_maps = compute_rgb ? (zeros(nx, ny), zeros(nx, ny), zeros(nx, ny)) : nothing
 
     ntiles = cld(nx, tile) * cld(ny, tile)
     info_user("Streaming $(ntiles) sky tile(s) through the radiative transfer")
@@ -64,11 +67,18 @@ function ProcessHI_tiled(simu, LOS;
 
         peakTb[ir, jr] .= maxLOS(Tb)
         if compute_moments
-            mom0[ir, jr] .= moment0(Tb, velArray)
-            mom1[ir, jr] .= moment1(Tb, velArray)
-            mom2[ir, jr] .= moment2(Tb, velArray)
+            m0, m1, m2 = moments012(Tb, velArray)
+            mom0[ir, jr] .= m0
+            mom1[ir, jr] .= m1
+            mom2[ir, jr] .= m2
         end
         compute_fftcnm && (fftc[ir, jr] .= fft_cnm_map(Tb, dv))
+        if compute_rgb
+            bands = velocity_rgb_bands(Tb, velArray; edges = rgb_velocity_edges)
+            rgb_maps[1][ir, jr] .= bands.red
+            rgb_maps[2][ir, jr] .= bands.green
+            rgb_maps[3][ir, jr] .= bands.blue
+        end
     end
 
     WriteData2D(resultspath, peakTb, "TbHI_peak"; metadata = metadata)
@@ -78,6 +88,11 @@ function ProcessHI_tiled(simu, LOS;
         WriteData2D(resultspath, mom2, "mom2"; metadata = metadata)
     end
     compute_fftcnm && WriteData2D(resultspath, fftc, "fftcnm"; metadata = metadata)
+    if compute_rgb
+        bounds = _rgb_edges(collect(float.(velArray)), rgb_velocity_edges)
+        _write_velocity_rgb_bands(resultspath, rgb_maps, bounds;
+                                  percentile = rgb_percentile, stretch = rgb_stretch)
+    end
 
     if compute_stats
         info_user("Computing spatial statistics (power spectrum + structure function)")

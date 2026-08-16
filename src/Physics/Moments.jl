@@ -5,6 +5,9 @@ of any 21-cm data set. All routines expect the velocity axis on dimension 3.
 - moment 0 : velocity-integrated brightness ∝ column density  [K km/s]
 - moment 1 : intensity-weighted mean velocity (centroid)       [km/s]
 - moment 2 : intensity-weighted velocity dispersion            [km/s]
+
+The accumulators sweep the cube channel by channel, so the innermost loop runs
+along `x` (contiguous in memory) and no cube-sized temporary is ever built.
 """
 
 """
@@ -15,8 +18,14 @@ optically thin limit.
 """
 function moment0(Tb, velArray)
     _, widths = _moment_inputs(Tb, velArray)
-    weights = reshape(widths, 1, 1, :)
-    return dropdims(sum(Tb .* weights; dims = 3); dims = 3)
+    out = zeros(size(Tb, 1), size(Tb, 2))
+    @inbounds for k in axes(Tb, 3)
+        w = widths[k]
+        for y in axes(Tb, 2), x in axes(Tb, 1)
+            out[x, y] += Tb[x, y, k] * w
+        end
+    end
+    return out
 end
 
 """
@@ -28,11 +37,8 @@ noise troughs.
 """
 function moment1(Tb, velArray)
     vel, widths = _moment_inputs(Tb, velArray)
-    v = reshape(vel, 1, 1, :)
-    w = max.(Tb, 0) .* reshape(widths, 1, 1, :)
-    num = dropdims(sum(w .* v; dims = 3); dims = 3)
-    den = dropdims(sum(w; dims = 3); dims = 3)
-    return num ./ _safe(den)
+    weight, weighted_v = _weight_sums(Tb, vel, widths)
+    return _safe_divide!(weighted_v, weighted_v, weight)
 end
 
 """
@@ -42,17 +48,77 @@ Second moment (velocity dispersion) `sqrt(∫ (v - v̄)² T_B dv / ∫ T_B dv)` 
 """
 function moment2(Tb, velArray)
     vel, widths = _moment_inputs(Tb, velArray)
-    v = reshape(vel, 1, 1, :)
-    w = max.(Tb, 0) .* reshape(widths, 1, 1, :)
-    den = dropdims(sum(w; dims = 3); dims = 3)
-    vbar = dropdims(sum(w .* v; dims = 3); dims = 3) ./ _safe(den)
-    var = dropdims(sum(w .* (v .- reshape(vbar, size(vbar)..., 1)) .^ 2; dims = 3); dims = 3) ./ _safe(den)
-    return sqrt.(max.(var, 0))
+    weight, weighted_v = _weight_sums(Tb, vel, widths)
+    vbar = _safe_divide!(weighted_v, weighted_v, weight)
+    return _dispersion(Tb, vel, widths, weight, vbar)
+end
+
+"""
+    moments012(Tb, velArray) -> (mom0, mom1, mom2)
+
+All three velocity moments from two sweeps of the cube instead of the five that
+computing them separately would cost. The dispersion keeps the two-pass
+`⟨(v - v̄)²⟩` form rather than `⟨v²⟩ - v̄²`, which loses precision for narrow
+lines far from zero velocity.
+"""
+function moments012(Tb, velArray)
+    vel, widths = _moment_inputs(Tb, velArray)
+
+    mom0 = zeros(size(Tb, 1), size(Tb, 2))
+    weight = zeros(size(Tb, 1), size(Tb, 2))
+    weighted_v = zeros(size(Tb, 1), size(Tb, 2))
+    @inbounds for k in axes(Tb, 3)
+        w, v = widths[k], vel[k]
+        for y in axes(Tb, 2), x in axes(Tb, 1)
+            t = Tb[x, y, k]
+            mom0[x, y] += t * w
+            wt = (t > 0 ? t : zero(t)) * w
+            weight[x, y] += wt
+            weighted_v[x, y] += wt * v
+        end
+    end
+
+    vbar = _safe_divide!(weighted_v, weighted_v, weight)
+    return mom0, vbar, _dispersion(Tb, vel, widths, weight, vbar)
+end
+
+# Non-negative weight sums: ∫ max(T_B, 0) dv and ∫ v max(T_B, 0) dv.
+function _weight_sums(Tb, vel, widths)
+    weight = zeros(size(Tb, 1), size(Tb, 2))
+    weighted_v = zeros(size(Tb, 1), size(Tb, 2))
+    @inbounds for k in axes(Tb, 3)
+        w, v = widths[k], vel[k]
+        for y in axes(Tb, 2), x in axes(Tb, 1)
+            t = Tb[x, y, k]
+            wt = (t > 0 ? t : zero(t)) * w
+            weight[x, y] += wt
+            weighted_v[x, y] += wt * v
+        end
+    end
+    return weight, weighted_v
+end
+
+# Second pass: sqrt(∫ (v - v̄)² max(T_B, 0) dv / ∫ max(T_B, 0) dv).
+function _dispersion(Tb, vel, widths, weight, vbar)
+    var = zeros(size(Tb, 1), size(Tb, 2))
+    @inbounds for k in axes(Tb, 3)
+        w, v = widths[k], vel[k]
+        for y in axes(Tb, 2), x in axes(Tb, 1)
+            t = Tb[x, y, k]
+            d = v - vbar[x, y]
+            var[x, y] += (t > 0 ? t : zero(t)) * w * d * d
+        end
+    end
+    @inbounds for i in eachindex(var, weight)
+        q = weight[i] == 0 ? NaN : var[i] / weight[i]
+        var[i] = sqrt(max(q, 0))
+    end
+    return var
 end
 
 function _moment_inputs(Tb, velArray)
     ndims(Tb) == 3 || throw(DimensionMismatch("Tb must be a 3D (x, y, velocity) cube."))
-    vel = collect(float.(velArray))
+    vel = _velocity_channels(velArray)
     length(vel) == size(Tb, 3) ||
         throw(DimensionMismatch("velocity axis has $(length(vel)) channels, but Tb has $(size(Tb, 3))."))
     isempty(vel) && throw(ArgumentError("velocity axis must not be empty."))
@@ -72,4 +138,12 @@ function _moment_inputs(Tb, velArray)
     return vel, widths
 end
 
-_safe(x) = map(v -> v == 0 ? oftype(v, NaN) : v, x)
+# Elementwise division yielding NaN where the weight vanishes: a spectrum with
+# no positive signal has no defined centroid. May alias `out` with `num`.
+function _safe_divide!(out, num, den)
+    @inbounds for i in eachindex(out, num, den)
+        d = den[i]
+        out[i] = d == 0 ? NaN : num[i] / d
+    end
+    return out
+end

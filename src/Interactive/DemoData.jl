@@ -59,6 +59,8 @@ function make_demo_data(dir::AbstractString = "shine_demo"; npix::Integer = 16)
         "TCNM" => 200.0, "TWNM" => 2000.0,
         "phase_cubes" => true, "compute_fractions" => true,
         "compute_moments" => true, "compute_fftcnm" => true,
+        "compute_rgb" => true, "rgb_velocity_edges" => nothing,
+        "rgb_percentile" => 99.5, "rgb_stretch" => 3.0,
         "do_filter" => false, "kernel_size_hi" => 2.0,
         "add_noise" => false, "sigma" => 0.0, "rng_seed" => 0,
     )

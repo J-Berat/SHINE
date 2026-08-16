@@ -61,6 +61,20 @@ using Statistics: var
         @test_throws ArgumentError moment1(flat, [0.0, 2.0, 1.0])
     end
 
+    @testset "HI RGB composite maps velocity to colour" begin
+        vel = [-2.0, 0.0, 2.0]
+        Tb = zeros(2, 2, 3)
+        Tb[1, 1, 1] = 1.0  # low velocity -> blue
+        Tb[1, 2, 2] = 1.0  # middle velocity -> green
+        Tb[2, 1, 3] = 1.0  # high velocity -> red
+        rgb = velocity_rgb(Tb, vel; percentile = 100, stretch = 1).image
+        @test rgb[1, 1, :] == Float32[0, 0, 1]
+        @test rgb[1, 2, :] == Float32[0, 1, 0]
+        @test rgb[2, 1, :] == Float32[1, 0, 0]
+        @test_throws ArgumentError velocity_rgb(Tb[:, :, 1:2], vel[1:2])
+        @test_throws ArgumentError velocity_rgb(Tb, vel; edges = [-1, 0, 1, 2])
+    end
+
     @testset "thermal equilibrium is a sensible temperature" begin
         Tequ = tequilibrium(1.0)
         @test 10 < Tequ < 10_000
@@ -179,6 +193,7 @@ using Statistics: var
             @test isfile(joinpath(hi, "NHI.fits"))
             @test isfile(joinpath(hi, "TbHI.fits"))
             @test isfile(joinpath(hi, "mom0.fits"))
+            @test isfile(joinpath(hi, "RGBHI.png"))
             @test isfile(joinpath(dir, "demo", "SHINE_summary.log"))
         end
     end

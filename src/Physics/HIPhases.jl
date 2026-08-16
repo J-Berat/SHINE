@@ -18,14 +18,28 @@ element-wise so `nCNM .+ nLNM .+ nWNM == n` exactly.
 function HIPhases(n, T; TCNM::Real = 200, TWNM::Real = 2000)
     axes(n) == axes(T) || throw(DimensionMismatch("n and T must share the same axes."))
     TCNM <= TWNM || throw(ArgumentError("TCNM ($TCNM) must be <= TWNM ($TWNM)."))
-    all(isfinite, n) && all(isfinite, T) || throw(ArgumentError("n and T must contain only finite values."))
-    all(>=(0), n) || throw(ArgumentError("density must be non-negative."))
-    all(>(0), T) || throw(ArgumentError("temperature must be strictly positive."))
-    maskCNM = T .< TCNM
-    maskLNM = (T .>= TCNM) .& (T .< TWNM)
-    maskWNM = T .>= TWNM
 
-    return n .* maskCNM, n .* maskLNM, n .* maskWNM
+    nCNM = similar(n)
+    nLNM = similar(n)
+    nWNM = similar(n)
+    # Validation and splitting share a single sweep; the three boolean masks the
+    # broadcast form materialised are never built.
+    zero_n = zero(eltype(nCNM))
+    @inbounds for i in eachindex(n, T)
+        ni, Ti = n[i], T[i]
+        isfinite(ni) && isfinite(Ti) ||
+            throw(ArgumentError("n and T must contain only finite values."))
+        ni >= 0 || throw(ArgumentError("density must be non-negative."))
+        Ti > 0 || throw(ArgumentError("temperature must be strictly positive."))
+
+        cold = Ti < TCNM
+        warm = Ti >= TWNM
+        nCNM[i] = cold ? ni : zero_n
+        nLNM[i] = (cold || warm) ? zero_n : ni
+        nWNM[i] = warm ? ni : zero_n
+    end
+
+    return nCNM, nLNM, nWNM
 end
 
 """

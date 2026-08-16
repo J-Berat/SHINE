@@ -14,6 +14,7 @@ synchrotron emission) and shares the same interactive command-line experience.
   optically-thick and optically-thin brightness-temperature cubes and the
   optical-depth cube.
 - Compute **velocity moment** maps (integrated intensity, centroid, dispersion).
+- Render **RGB velocity composites** (low/mid/high velocities in blue/green/red).
 - Compute mass- and volume-weighted **gas-fraction** maps.
 - Estimate the **CNM fraction from the Fourier spectrum** (Marchal et al. 2024).
 - Apply an optional **Gaussian beam** and add optional **Gaussian noise**.
@@ -81,6 +82,11 @@ For each simulation and line of sight, in `<simu>/<LOS>/HI/`:
 | `mom0`, `mom1`, `mom2` | 2D | velocity moments [K km/s], [km/s], [km/s] |
 | `fCNMmass`, … / `fCNMvol`, … | 2D | mass / volume fraction maps [%] |
 | `fftcnm` | 2D | Fourier CNM tracer |
+| `RGBHI.png` | RGB image | HI velocity composite: low/mid/high velocities in blue/green/red |
+
+The RGB intervals split the spectral channels into three equal groups by
+default. Set `rgb_velocity_edges` to four boundaries in km/s (for example
+`[-30, -10, 10, 30]`), or set `compute_rgb` to `false` to disable this output.
 
 ## License
 

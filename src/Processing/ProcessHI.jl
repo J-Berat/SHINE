@@ -15,6 +15,7 @@ output directory.
 - `phase_cubes`  (true)   : also build CNM/LNM/WNM `T_B(v)` cubes (4× cost).
 - `compute_fractions`(true): write mass- and volume-fraction maps.
 - `compute_moments` (true): write velocity moment 0/1/2 maps of `TbHI`.
+- `compute_rgb` (true)    : write `RGBHI.png`, colour-coded by velocity.
 - `compute_fftcnm` (false): write the Marchal FFT CNM tracer map.
 - `compute_stats` (false): write power-spectrum + structure-function of NHI/mom0.
 - `do_filter` (false)     : Gaussian-smooth every cube (`kernel_size_hi` = σ pix).
@@ -28,7 +29,9 @@ function ProcessHI(simu, LOS;
                    conversionn::Real = 1.0, conversionT::Real = 1.0, conversionV::Real = 1.0,
                    phase_cubes::Bool = true, compute_fractions::Bool = true,
                    compute_moments::Bool = true, compute_fftcnm::Bool = false,
-                   compute_stats::Bool = false,
+                   compute_stats::Bool = false, compute_rgb::Bool = true,
+                   rgb_velocity_edges = nothing, rgb_percentile::Real = 99.5,
+                   rgb_stretch::Real = 3.0,
                    do_filter::Bool = false, kernel_size_hi::Real = 2.0,
                    add_noise::Bool = false, sigma::Real = 0.0, rng = Random.default_rng(),
                    mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
@@ -96,8 +99,10 @@ function ProcessHI(simu, LOS;
         info_user("Adding Gaussian noise (σ = $(sigma) K)")
         for (name, cube) in cubes
             startswith(name, "Tb") || continue      # noise only on brightness cubes
-            for k in axes(cube, 3)
-                @views cube[:, :, k] .+= rand(rng, Normal(0.0, sigma), size(cube, 1), size(cube, 2))
+            # σ·randn draws the same distribution as Normal(0, σ) without
+            # allocating a matrix per channel.
+            @inbounds for i in eachindex(cube)
+                cube[i] += sigma * randn(rng)
             end
         end
     end
@@ -107,14 +112,20 @@ function ProcessHI(simu, LOS;
         WriteData3D(resultspath, cube, name, velArray; metadata = metadata)
     end
 
+    if compute_rgb
+        info_user("Rendering velocity-coded HI RGB composite")
+        write_velocity_rgb(resultspath, TbHI, velArray; edges = rgb_velocity_edges,
+                           percentile = rgb_percentile, stretch = rgb_stretch)
+    end
+
     # --- velocity moments of the total HI cube -----------------------------
     mom0map = nothing
     if compute_moments
         info_user("Computing velocity moment maps")
-        mom0map = moment0(TbHI, velArray)
+        mom0map, mom1map, mom2map = moments012(TbHI, velArray)
         WriteData2D(resultspath, mom0map, "mom0"; metadata = metadata)
-        WriteData2D(resultspath, moment1(TbHI, velArray), "mom1"; metadata = metadata)
-        WriteData2D(resultspath, moment2(TbHI, velArray), "mom2"; metadata = metadata)
+        WriteData2D(resultspath, mom1map, "mom1"; metadata = metadata)
+        WriteData2D(resultspath, mom2map, "mom2"; metadata = metadata)
     end
 
     # --- FFT CNM tracer ----------------------------------------------------

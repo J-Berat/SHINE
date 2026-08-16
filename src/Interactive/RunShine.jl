@@ -43,6 +43,7 @@ function write_summary_log(base_dir, chosen_simu, chosen_LOS, elapsed, cfg; conf
         for k in ("conversionn", "conversionT", "conversionV", "BoxLength_pc", "BoxLength_pix",
                   "velstart", "velend", "dvel", "TCNM", "TWNM", "phase_cubes", "compute_fractions",
                   "compute_moments", "compute_fftcnm", "compute_stats",
+                  "compute_rgb", "rgb_velocity_edges", "rgb_percentile", "rgb_stretch",
                   "use_tiles", "tile", "do_filter", "kernel_size_hi",
                   "add_noise", "sigma", "rng_seed", "mu", "therm")
             haskey(cfg, k) && println(io, "$k: $(cfg[k])")
@@ -188,6 +189,12 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
     config["compute_moments"] = yesno(ask_user("Compute velocity moment maps (0/1/2)? (Y/N)", get(config, "compute_moments", true) ? "Y" : "N"; validate = is_yes_no))
     config["compute_fftcnm"] = yesno(ask_user("Compute FFT CNM tracer map (Marchal+24)? (Y/N)", get(config, "compute_fftcnm", false) ? "Y" : "N"; validate = is_yes_no))
     config["compute_stats"] = yesno(ask_user("Compute spatial statistics (power spectrum + structure function)? (Y/N)", get(config, "compute_stats", false) ? "Y" : "N"; validate = is_yes_no))
+    compute_rgb = yesno(ask_user("Create an HI RGB velocity composite? (Y/N)", get(config, "compute_rgb", true) ? "Y" : "N"; validate = is_yes_no))
+    config["compute_rgb"] = compute_rgb
+    if compute_rgb
+        config["rgb_percentile"] = ask_user("RGB normalization percentile", Float64(get(config, "rgb_percentile", 99.5)))
+        config["rgb_stretch"] = ask_user("RGB asinh stretch", Float64(get(config, "rgb_stretch", 3.0)))
+    end
 
     # 7. Beam smoothing -----------------------------------------------------
     section("Angular smoothing")
@@ -258,6 +265,10 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
                                 compute_moments = get(cfg, "compute_moments", true),
                                 compute_fftcnm = get(cfg, "compute_fftcnm", false),
                                 compute_stats = get(cfg, "compute_stats", false),
+                                compute_rgb = get(cfg, "compute_rgb", true),
+                                rgb_velocity_edges = get(cfg, "rgb_velocity_edges", nothing),
+                                rgb_percentile = get(cfg, "rgb_percentile", 99.5),
+                                rgb_stretch = get(cfg, "rgb_stretch", 3.0),
                                 mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
                                 metadata = metadata)
             else
@@ -271,6 +282,10 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
                           compute_moments = get(cfg, "compute_moments", true),
                           compute_fftcnm = get(cfg, "compute_fftcnm", false),
                           compute_stats = get(cfg, "compute_stats", false),
+                          compute_rgb = get(cfg, "compute_rgb", true),
+                          rgb_velocity_edges = get(cfg, "rgb_velocity_edges", nothing),
+                          rgb_percentile = get(cfg, "rgb_percentile", 99.5),
+                          rgb_stretch = get(cfg, "rgb_stretch", 3.0),
                           do_filter = get(cfg, "do_filter", false),
                           kernel_size_hi = get(cfg, "kernel_size_hi", 2.0),
                           add_noise = get(cfg, "add_noise", false), sigma = get(cfg, "sigma", 0.0),

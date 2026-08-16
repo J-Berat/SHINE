@@ -34,6 +34,28 @@ Standard deviation along the line of sight.
 sigmaLOS(cube::AbstractArray) = dropdims(std(cube, dims = 3), dims = 3)
 
 """
+    _chunk_ranges(n, nchunks) -> Vector{UnitRange{Int}}
+
+Split `1:n` into at most `nchunks` contiguous, near-equal ranges. Used to hand
+each worker task one slab of sky rows so per-thread scratch (buffers, FFT plans)
+can be allocated once per task instead of once per pixel — and stays correct
+even if a task migrates between threads.
+"""
+function _chunk_ranges(n::Integer, nchunks::Integer)
+    n <= 0 && return UnitRange{Int}[]
+    k = clamp(nchunks, 1, n)
+    step, rest = divrem(n, k)
+    ranges = Vector{UnitRange{Int}}(undef, k)
+    start = 1
+    for c in 1:k
+        len = step + (c <= rest ? 1 : 0)
+        ranges[c] = start:(start + len - 1)
+        start += len
+    end
+    return ranges
+end
+
+"""
     logindgen(n, a, b) -> Vector{Float64}
 
 `n` points logarithmically spaced between `a` and `b` (inclusive). Mirrors the

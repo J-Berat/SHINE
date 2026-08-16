@@ -136,6 +136,121 @@ using Random: MersenneTwister
         end
     end
 
+    @testset "line-of-sight frame" begin
+        # theta = 0 looks down +z and leaves the box axes alone.
+        e1, e2, nhat = los_vectors(0, 0)
+        @test collect(nhat) ≈ [0, 0, 1]
+        @test collect(e1) ≈ [1, 0, 0]
+        @test collect(e2) ≈ [0, 1, 0]
+
+        # theta = 90 lays the line of sight in the xy plane.
+        @test collect(los_vectors(90, 0)[3]) ≈ [1, 0, 0] atol = 1e-12
+        @test collect(los_vectors(90, 90)[3]) ≈ [0, 1, 0] atol = 1e-12
+
+        # Orthonormal and right-handed for an arbitrary direction.
+        e1, e2, nhat = los_vectors(37, 128)
+        for v in (e1, e2, nhat)
+            @test sum(abs2, v) ≈ 1
+        end
+        dot3(a, b) = a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+        @test dot3(e1, e2) ≈ 0 atol = 1e-12
+        @test dot3(e1, nhat) ≈ 0 atol = 1e-12
+        @test dot3(e2, nhat) ≈ 0 atol = 1e-12
+        cross3(a, b) = (a[2] * b[3] - a[3] * b[2],
+                        a[3] * b[1] - a[1] * b[3],
+                        a[1] * b[2] - a[2] * b[1])
+        @test collect(cross3(e1, e2)) ≈ collect(nhat) atol = 1e-12
+
+        @test_throws ArgumentError los_vectors(NaN, 0)
+    end
+
+    @testset "rotating the box" begin
+        field = reshape(collect(1.0:(6 * 6 * 6)), 6, 6, 6)
+
+        # Looking down +z changes nothing at all.
+        @test project_cube(field, los_vectors(0, 0)...) ≈ field
+
+        # Multiples of 90 degrees land back on grid points, so the rotated cube
+        # holds exactly the same values, only permuted — no interpolation.
+        for (th, ph) in ((90, 0), (90, 90), (180, 0), (90, 180))
+            rot = project_cube(field, los_vectors(th, ph)...)
+            @test sort(vec(rot)) ≈ sort(vec(field))
+            @test sum(rot) ≈ sum(field)
+        end
+
+        # A uniform field stays uniform whatever the angle and the boundary.
+        flat = fill(2.5, 5, 5, 5)
+        for periodic in (true, false)
+            @test project_cube(flat, los_vectors(33, 77)...; periodic = periodic) ≈ flat
+        end
+
+        # Trilinear interpolation is a convex combination of eight cells, so an
+        # arbitrary rotation can never leave the range of the original.
+        rot = project_cube(field, los_vectors(33, 77)...)
+        @test minimum(rot) >= minimum(field) - 1e-9
+        @test maximum(rot) <= maximum(field) + 1e-9
+    end
+
+    @testset "velocity projects onto the line of sight" begin
+        # A uniform vector field must give V . nhat everywhere, exactly.
+        Vx = fill(1.0, 4, 4, 4); Vy = fill(2.0, 4, 4, 4); Vz = fill(3.0, 4, 4, 4)
+        for (th, ph, expected) in ((0, 0, 3.0), (90, 0, 1.0), (90, 90, 2.0), (180, 0, -3.0))
+            los = project_los_velocity(Vx, Vy, Vz, los_vectors(th, ph)...)
+            @test all(v -> isapprox(v, expected; atol = 1e-10), los)
+        end
+
+        # theta = 60, phi = 30: nhat = (sin60 cos30, sin60 sin30, cos60).
+        los = project_los_velocity(Vx, Vy, Vz, los_vectors(60, 30)...)
+        s60, c60 = sincos(deg2rad(60)); s30, c30 = sincos(deg2rad(30))
+        @test los[2, 2, 2] ≈ 1 * s60 * c30 + 2 * s60 * s30 + 3 * c60
+
+        @test_throws DimensionMismatch project_los_velocity(Vx, Vy, ones(2, 2, 2),
+                                                            los_vectors(0, 0)...)
+    end
+
+    @testset "line-of-sight labels and metadata" begin
+        @test los_label("z") == "z"
+        @test los_label((45, 30)) == "th45_ph30"
+        @test los_label((45.5, -30)) == "th45p5_phm30"
+        @test los_metadata("y")["LOSAXIS"] == "y"
+        @test los_metadata((45, 30))["LOSTHETA"] ≈ 45
+        @test los_metadata((45, 30))["LOSPHI"] ≈ 30
+
+        @test Shine._parse_los("all") == ["x", "y", "z"]
+        @test Shine._parse_los("z,45:30") == Any["z", (45.0, 30.0)]
+        @test Shine._parse_los("x,x,z") == Any["x", "z"]          # de-duplicated
+        @test Shine._parse_los("q,z") == Any["z"]                  # junk dropped
+        @test Shine._parse_los("1:2:3") == Any[]                   # malformed pair
+    end
+
+    @testset "an angled line of sight runs end to end" begin
+        mktempdir() do dir
+            demo = make_demo_data(joinpath(dir, "demo"); npix = 8)
+            cfg = Shine.JSON.parsefile(demo.config_path)
+            vel = velocity_array(cfg["velstart"], cfg["velend"], cfg["dvel"])
+            plen = pixel_length_cm(cfg["BoxLength_pc"], Int(cfg["BoxLength_pix"]))
+            out = ProcessHI(demo.simu_dir, (30.0, 45.0);
+                            TCNM = cfg["TCNM"], TWNM = cfg["TWNM"], velArray = vel,
+                            PixelLength_cm = plen, phase_cubes = false,
+                            compute_fractions = false, compute_fftcnm = false)
+            @test out == joinpath(demo.simu_dir, "th30_ph45", "HI")
+            @test isfile(joinpath(out, "NHI.fits"))
+            hdr = Shine.FITSIO.FITS(joinpath(out, "mom0.fits")) do f
+                Shine.FITSIO.read_header(f[1])
+            end
+            @test hdr["LOSTHETA"] ≈ 30.0
+            @test hdr["LOSPHI"] ≈ 45.0
+
+            # Looking down +z through the rotated path must reproduce the plain
+            # z-axis run: no resampling happens at theta = 0.
+            axis = ReadSimulation(demo.simu_dir, "z", 1.0, 1.0, 1.0)
+            rotated = ReadSimulation(demo.simu_dir, (0.0, 0.0), 1.0, 1.0, 1.0)
+            @test rotated[1] ≈ axis[1]
+            @test rotated[2] ≈ axis[2]
+            @test rotated[3] ≈ axis[3]
+        end
+    end
+
     @testset "physical beam geometry" begin
         # 0.2 pc pixel at 100 pc: theta = 0.002 rad = 6.8755 arcmin.
         @test pixel_scale_arcmin(0.2, 100.0) ≈ rad2deg(0.002) * 60

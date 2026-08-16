@@ -99,17 +99,40 @@ function read_field(simu, field)
     return data
 end
 
-"""
-    ReadSimulation(simu, LOS, conversionn, conversionT, conversionV) -> (n, VLOS, T)
+# Shared sanity checks on the raw fields, before any orientation is applied.
+function _validate_fields(n, T, V...)
+    for v in V
+        size(n) == size(T) == size(v) || throw(DimensionMismatch(
+            "simulation fields must have the same shape: density=$(size(n)), " *
+            "temperature=$(size(T)), velocity=$(size(v))."))
+        all(isfinite, v) || throw(ArgumentError("velocity contains NaN or Inf values."))
+    end
+    all(isfinite, n) || throw(ArgumentError("density contains NaN or Inf values."))
+    all(isfinite, T) || throw(ArgumentError("temperature contains NaN or Inf values."))
+    all(>=(0), n) || throw(ArgumentError("density contains negative values."))
+    all(>(0), T) || throw(ArgumentError("temperature must be strictly positive in every cell."))
+    return nothing
+end
 
-Read the density, LOS velocity and temperature cubes for line of sight `LOS`
-(`"x"`, `"y"` or `"z"`), apply the unit-conversion factors, and orient every cube
-so that the line of sight is the third axis.
+"""
+    ReadSimulation(simu, LOS, conversionn, conversionT, conversionV; periodic = true)
+        -> (n, VLOS, T)
+
+Read the density, LOS velocity and temperature cubes for line of sight `LOS`,
+apply the unit-conversion factors, and orient every cube so that the line of
+sight is the third axis.
+
+`LOS` is either a box axis — `"x"`, `"y"` or `"z"`, handled by a permutation
+with no resampling — or a `(theta, phi)` pair of angles in degrees, which
+rotates the box onto that viewing direction (see [`project_cube`](@ref)).
+`periodic` selects the boundary used by the rotation and is ignored for an axis.
 
 Returned units after conversion: `n` in cm^-3, `VLOS` in km/s, `T` in K.
 """
-function ReadSimulation(simu, LOS, conversionn::Real, conversionT::Real, conversionV::Real)
-    LOS in ("x", "y", "z") || error("Invalid LOS `$(LOS)`; expected \"x\", \"y\" or \"z\".")
+function ReadSimulation(simu, LOS::AbstractString, conversionn::Real, conversionT::Real,
+                        conversionV::Real; periodic::Bool = true)
+    LOS in ("x", "y", "z") ||
+        error("Invalid LOS `$(LOS)`; expected \"x\", \"y\", \"z\" or a (theta, phi) tuple.")
     all(isfinite, (conversionn, conversionT, conversionV)) ||
         throw(ArgumentError("unit-conversion factors must be finite."))
 
@@ -117,13 +140,43 @@ function ReadSimulation(simu, LOS, conversionn::Real, conversionT::Real, convers
     T = read_field(simu, "temperature") .* conversionT
     V = read_field(simu, _los_velocity_field(LOS)) .* conversionV
 
-    size(n) == size(T) == size(V) || throw(DimensionMismatch(
-        "simulation fields must have the same shape: density=$(size(n)), temperature=$(size(T)), velocity=$(size(V))."))
-    all(isfinite, n) || throw(ArgumentError("density contains NaN or Inf values."))
-    all(isfinite, T) || throw(ArgumentError("temperature contains NaN or Inf values."))
-    all(isfinite, V) || throw(ArgumentError("velocity contains NaN or Inf values."))
-    all(>=(0), n) || throw(ArgumentError("density contains negative values."))
-    all(>(0), T) || throw(ArgumentError("temperature must be strictly positive in every cell."))
-
+    _validate_fields(n, T, V)
     return _orient_los(n, LOS), _orient_los(V, LOS), _orient_los(T, LOS)
+end
+
+"""
+    ReadSimulation(simu, (theta, phi), conversionn, conversionT, conversionV;
+                   periodic = true) -> (n, VLOS, T)
+
+Rotated variant: resample the box so that the viewing direction `(theta, phi)`
+in degrees becomes the third axis, and project the velocity vector onto it.
+
+Memory note: this reads five cubes (density, temperature and all three velocity
+components) where the axis path reads three, and allocates three more for the
+resampled output.
+"""
+function ReadSimulation(simu, LOS::Tuple{<:Real,<:Real}, conversionn::Real, conversionT::Real,
+                        conversionV::Real; periodic::Bool = true)
+    all(isfinite, (conversionn, conversionT, conversionV)) ||
+        throw(ArgumentError("unit-conversion factors must be finite."))
+    e1, e2, nhat = los_vectors(LOS[1], LOS[2])
+
+    n = read_field(simu, "density") .* conversionn
+    T = read_field(simu, "temperature") .* conversionT
+    Vx = read_field(simu, "Vx") .* conversionV
+    Vy = read_field(simu, "Vy") .* conversionV
+    Vz = read_field(simu, "Vz") .* conversionV
+
+    _validate_fields(n, T, Vx, Vy, Vz)
+    # Wrapping across a boundary only makes sense between faces of equal size,
+    # and off-axis views of a non-cubic box mix axes of different length.
+    allequal(size(n)) || warn_user(
+        "Box is $(join(size(n), "x")) — a rotated view of a non-cubic box mixes axes " *
+        "of different lengths; interpret the resampled cube with care.")
+
+    VLOS = project_los_velocity(Vx, Vy, Vz, e1, e2, nhat; periodic = periodic)
+    Vx = Vy = Vz = nothing                  # release before the scalar passes
+    return (project_cube(n, e1, e2, nhat; periodic = periodic),
+            VLOS,
+            project_cube(T, e1, e2, nhat; periodic = periodic))
 end

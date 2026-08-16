@@ -4,8 +4,12 @@
 Full 21-cm processing of one simulation for one line of sight. Reads the
 simulation cubes, separates the neutral phases, solves the radiative transfer,
 optionally smooths and adds noise, and writes every product as a FITS file under
-`simu/LOS/HI` (or `simu/LOS/HI/filtered` when smoothing is enabled). Returns the
+`simu/<LOS>/HI` (or `.../HI/filtered` when a response is applied). Returns the
 output directory.
+
+`LOS` is a box axis (`"x"`, `"y"`, `"z"`) or a `(theta, phi)` pair of angles in
+degrees for an arbitrary viewing direction; [`los_label`](@ref) names the output
+directory accordingly.
 
 # Keyword arguments
 - `TCNM`, `TWNM`          : phase temperature thresholds [K].
@@ -34,6 +38,8 @@ output directory.
                             so the map's noise is correlated over a beam width,
                             as in a real observation. Set `false` for white
                             noise (noise added after gridding).
+- `periodic_box` (true)   : boundary used when `LOS` is a `(theta, phi)` pair;
+                            wraps across faces, as an MHD box usually allows.
 - `mu`, `therm`           : passed to [`HIspectrum`](@ref).
 - `metadata`              : extra FITS header keywords.
 """
@@ -47,16 +53,19 @@ function ProcessHI(simu, LOS;
                    beam_fwhm_arcmin::Real = 0.0, distance_pc::Real = 0.0,
                    spectral_fwhm_kms::Real = 0.0,
                    add_noise::Bool = false, sigma::Real = 0.0, correlated_noise::Bool = true,
-                   rng = Random.default_rng(),
+                   rng = Random.default_rng(), periodic_box::Bool = true,
                    mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
 
-    printstyled("\n▶ Processing HI for LOS $(LOS): $(simu)\n"; color = :cyan, bold = true)
-    resultspath = joinpath(simu, LOS, "HI")
+    label = los_label(LOS)
+    printstyled("\n▶ Processing HI for LOS $(label): $(simu)\n"; color = :cyan, bold = true)
+    resultspath = joinpath(simu, label, "HI")
     mkpath(resultspath)
 
     # --- read fields -------------------------------------------------------
-    n, VLOS, T = ReadSimulation(simu, LOS, conversionn, conversionT, conversionV)
+    n, VLOS, T = ReadSimulation(simu, LOS, conversionn, conversionT, conversionV;
+                                periodic = periodic_box)
     dv = length(velArray) > 1 ? abs(float(velArray[2] - velArray[1])) : 1.0
+    metadata = merge_metadata(metadata, los_metadata(LOS))
 
     # --- phase separation + column densities -------------------------------
     info_user("Separating neutral phases and integrating column densities")
@@ -183,6 +192,6 @@ function ProcessHI(simu, LOS;
         mom0map !== nothing && write_spatial_stats(resultspath, mom0map, "mom0"; dx = dx_pc)
     end
 
-    printstyled("✓ Finished LOS $(LOS): products in $(resultspath)\n"; color = :green, bold = true)
+    printstyled("✓ Finished LOS $(label): products in $(resultspath)\n"; color = :green, bold = true)
     return resultspath
 end

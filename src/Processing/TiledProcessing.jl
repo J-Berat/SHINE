@@ -18,16 +18,20 @@ function ProcessHI_tiled(simu, LOS;
                          tile::Integer = 128,
                          compute_fractions::Bool = true, compute_moments::Bool = true,
                          compute_fftcnm::Bool = false, compute_stats::Bool = false,
-                         mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
+                         mu::Real = 1.0, therm::Real = 0.0, periodic_box::Bool = true,
+                         metadata = nothing)
 
     tile > 0 || error("tile must be a positive integer (got $tile).")
-    printstyled("\n▶ Processing HI (tiled, tile=$(tile)) for LOS $(LOS): $(simu)\n"; color = :cyan, bold = true)
-    resultspath = joinpath(simu, LOS, "HI")
+    label = los_label(LOS)
+    printstyled("\n▶ Processing HI (tiled, tile=$(tile)) for LOS $(label): $(simu)\n"; color = :cyan, bold = true)
+    resultspath = joinpath(simu, label, "HI")
     mkpath(resultspath)
 
-    n, VLOS, T = ReadSimulation(simu, LOS, conversionn, conversionT, conversionV)
+    n, VLOS, T = ReadSimulation(simu, LOS, conversionn, conversionT, conversionV;
+                                periodic = periodic_box)
     nx, ny = size(n, 1), size(n, 2)
     dv = length(velArray) > 1 ? abs(float(velArray[2] - velArray[1])) : 1.0
+    metadata = merge_metadata(metadata, los_metadata(LOS))
 
     # Column densities and fractions come straight from the density/temperature
     # cubes — no PPV cube required.
@@ -99,6 +103,6 @@ function ProcessHI_tiled(simu, LOS;
         compute_moments && write_spatial_stats(resultspath, mom0, "mom0"; dx = dx_pc)
     end
 
-    printstyled("✓ Finished LOS $(LOS) (tiled): 2D products in $(resultspath)\n"; color = :green, bold = true)
+    printstyled("✓ Finished LOS $(label) (tiled): 2D products in $(resultspath)\n"; color = :green, bold = true)
     return resultspath
 end

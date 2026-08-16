@@ -27,6 +27,7 @@
   "add_noise": false,
   "sigma": 0.0,
   "correlated_noise": true,
+  "periodic_box": true,
   "rng_seed": 0,
   "mu": 1.0,
   "therm": 0.0

@@ -93,6 +93,19 @@ ProcessHI(simu, "z"; TCNM = 200, TWNM = 2000, velArray = vel,
           do_filter = true, beam_fwhm_arcmin = 3.5, distance_pc = 150)
 ```
 
+### Viewing direction
+
+A line of sight is a box axis (`"x"`, `"y"`, `"z"`, permuted with no resampling)
+or a `(theta, phi)` pair of angles in degrees — `theta` from +z, `phi` from +x in
+the xy plane — which rotates the box onto that direction and projects the
+velocity vector onto it. Interactively, write an angle pair as `theta:phi`
+alongside the axes, e.g. `x,z,45:30`. Products land in `<simu>/th45_ph30/HI/`
+and record `LOSTHETA` / `LOSPHI` in the header.
+
+Rotation samples the box periodically by default, so a rotated cube is filled
+everywhere rather than having empty corners; pass `periodic_box = false` for a
+non-periodic box, which replicates the edge cells instead.
+
 ### Spectral response
 
 `spectral_fwhm_kms` convolves the velocity axis with the spectrometer's channel

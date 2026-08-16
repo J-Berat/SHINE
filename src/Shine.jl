@@ -20,6 +20,7 @@ include(joinpath("Utils", "Progress.jl"))
 
 # --- File I/O --------------------------------------------------------------
 include(joinpath("FileIO", "SimulationDiscovery.jl"))
+include(joinpath("FileIO", "Projection.jl"))
 include(joinpath("FileIO", "ReadSimulation.jl"))
 include(joinpath("FileIO", "WriteDataOnDisk.jl"))
 
@@ -57,6 +58,7 @@ include(joinpath("Interactive", "DemoData.jl"))
 
 export run_shine, SHINE_from_config, make_demo_data,
        ReadSimulation, read_field, get_simulation_list,
+       los_vectors, los_label, los_metadata, project_cube, project_los_velocity,
        WriteData2D, WriteData3D,
        HIspectrum, HIspectrum_tb, HIcube, HIcube_tb, HIPhases, HIColumnDensity,
        GasFraction, VolumeFraction, GasFractionMap, VolumeFractionMap,

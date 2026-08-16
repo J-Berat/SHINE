@@ -36,7 +36,7 @@ function write_summary_log(base_dir, chosen_simu, chosen_LOS, elapsed, cfg; conf
         println(io, "SHINE version: $(shine_version())  git: $(shine_git_hash())")
         println(io, "Simulations processed:")
         foreach(s -> println(io, "  ", s), chosen_simu)
-        println(io, "Lines of sight: $(join(chosen_LOS, ", "))")
+        println(io, "Lines of sight: $(join(los_label.(chosen_LOS), ", "))")
         println(io, "Output directory: $base_dir")
         println(io, "Total execution time: $(format_duration(elapsed))")
         config_saved_path !== nothing && println(io, "Config saved: $(config_saved_path)")
@@ -45,7 +45,8 @@ function write_summary_log(base_dir, chosen_simu, chosen_LOS, elapsed, cfg; conf
                   "compute_moments", "compute_fftcnm", "compute_stats",
                   "use_tiles", "tile", "do_filter", "kernel_size_hi",
                   "beam_fwhm_arcmin", "distance_pc", "spectral_fwhm_kms",
-                  "add_noise", "sigma", "correlated_noise", "rng_seed", "mu", "therm")
+                  "add_noise", "sigma", "correlated_noise", "rng_seed",
+                  "periodic_box", "mu", "therm")
             haskey(cfg, k) && println(io, "$k: $(cfg[k])")
         end
     end
@@ -55,12 +56,33 @@ end
 
 const _VALID_LOS = ("x", "y", "z")
 
+# Accepts box axes ("x", "y", "z") and arbitrary viewing directions written
+# `theta:phi` in degrees, e.g. "z,45:30". The colon keeps an angle pair a single
+# token inside the comma-separated list.
 function _parse_los(los_choice)
-    uppercase(strip(los_choice)) == "ALL" && return collect(_VALID_LOS)
-    out = String[]
+    uppercase(strip(los_choice)) == "ALL" && return Any[_VALID_LOS...]
+    out = Any[]
     for tok in split(los_choice, ",")
-        s = lowercase(strip(tok))
-        (s in _VALID_LOS && !(s in out)) && push!(out, s)
+        s = strip(tok)
+        isempty(s) && continue
+        if occursin(':', s)
+            parts = split(s, ':')
+            angles = length(parts) == 2 ?
+                (tryparse(Float64, strip(parts[1])), tryparse(Float64, strip(parts[2]))) :
+                (nothing, nothing)
+            if angles[1] === nothing || angles[2] === nothing
+                warn_user("Ignoring invalid viewing direction: $(s) (expected theta:phi in degrees).")
+            elseif !(angles in out)
+                push!(out, angles)
+            end
+            continue
+        end
+        axis = lowercase(s)
+        if axis in _VALID_LOS
+            axis in out || push!(out, axis)
+        else
+            warn_user("Ignoring invalid line of sight: $(s).")
+        end
     end
     return out
 end
@@ -281,12 +303,17 @@ function run_shine_interactive(; quiet::Bool = false, reset_config::Bool = true)
 
     # 10. Lines of sight -----------------------------------------------------
     section("Lines of sight")
-    los_choice = ask_user("Enter 'all' or comma-separated lines of sight (e.g., x,z)",
+    los_choice = ask_user("Enter 'all', box axes and/or viewing angles theta:phi in degrees (e.g., x,z,45:30)",
                           get(config, "chosen_LOS_input", "all");
                           validate = c -> !isempty(_parse_los(c)),
-                          error_message = "Please enter at least one of x, y, z.")
+                          error_message = "Please enter at least one of x, y, z or a theta:phi pair.")
     chosen_LOS = _parse_los(los_choice)
     config["chosen_LOS_input"] = los_choice
+    # The boundary only matters for a rotated view; an axis needs no resampling.
+    config["periodic_box"] = any(l -> l isa Tuple, chosen_LOS) ?
+        yesno(ask_user("Is the simulation box periodic? (wraps a rotated view instead of replicating edges) (Y/N)",
+                       get(config, "periodic_box", true) ? "Y" : "N"; validate = is_yes_no)) :
+        get(config, "periodic_box", true)
 
     # 11. Save config -------------------------------------------------------
     section("Save configuration")
@@ -329,6 +356,7 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
                                 compute_fftcnm = get(cfg, "compute_fftcnm", false),
                                 compute_stats = get(cfg, "compute_stats", false),
                                 mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),
+                                periodic_box = get(cfg, "periodic_box", true),
                                 metadata = metadata)
             else
                 ProcessHI(simu, LOS;
@@ -346,6 +374,7 @@ function run_shine_processing(cfg::AbstractDict, chosen_simu, chosen_LOS, base_d
                           beam_fwhm_arcmin = get(cfg, "beam_fwhm_arcmin", 0.0),
                           distance_pc = get(cfg, "distance_pc", 0.0),
                           spectral_fwhm_kms = get(cfg, "spectral_fwhm_kms", 0.0),
+                          periodic_box = get(cfg, "periodic_box", true),
                           add_noise = get(cfg, "add_noise", false), sigma = get(cfg, "sigma", 0.0),
                           correlated_noise = get(cfg, "correlated_noise", true),
                           rng = rng, mu = get(cfg, "mu", 1.0), therm = get(cfg, "therm", 0.0),

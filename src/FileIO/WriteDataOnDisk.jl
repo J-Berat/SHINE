@@ -37,6 +37,9 @@ const _METADATA_COMMENTS = Dict(
     "NOISE" => "Noise standard deviation [K]",
     "NOISETYP" => "Noise correlation model",
     "SPECFWHM" => "Spectral response FWHM [km/s]",
+    "LOSAXIS" => "Line of sight (box axis)",
+    "LOSTHETA" => "Line of sight polar angle from +z [deg]",
+    "LOSPHI" => "Line of sight azimuth from +x [deg]",
 )
 
 """

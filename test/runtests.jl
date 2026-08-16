@@ -208,6 +208,40 @@ using Random: MersenneTwister
                                                             los_vectors(0, 0)...)
     end
 
+    @testset "scalar and vector fields rotate through the same geometry" begin
+        # A *uniform* vector field says nothing about where the projection
+        # samples: it would look right even with the wrong rotation. These use
+        # varying fields, so the sampling geometry is what is under test.
+        rng = MersenneTwister(19)
+        Vx = randn(rng, 7, 7, 7); Vy = randn(rng, 7, 7, 7); Vz = randn(rng, 7, 7, 7)
+
+        for (th, ph) in ((0, 0), (90, 0), (37, 128), (180, 0))
+            e1, e2, nhat = los_vectors(th, ph)
+            for periodic in (true, false)
+                los = project_los_velocity(Vx, Vy, Vz, e1, e2, nhat; periodic = periodic)
+                # Projecting the vector must equal projecting each component as
+                # a scalar and contracting afterwards. Any divergence between
+                # the two paths — different source points, different boundary —
+                # breaks this identity.
+                componentwise =
+                    nhat[1] .* project_cube(Vx, e1, e2, nhat; periodic = periodic) .+
+                    nhat[2] .* project_cube(Vy, e1, e2, nhat; periodic = periodic) .+
+                    nhat[3] .* project_cube(Vz, e1, e2, nhat; periodic = periodic)
+                @test los ≈ componentwise
+            end
+        end
+
+        # Looking from the opposite side flips the cube and the sign of the
+        # velocity together — the failure mode that would quietly invert every
+        # moment-1 map while leaving column densities looking perfect.
+        n = rand(MersenneTwister(23), 6, 6, 6) .+ 0.5
+        e1, e2, nhat = los_vectors(180, 0)
+        @test project_cube(n, e1, e2, nhat) ≈ n[end:-1:1, :, end:-1:1]
+        @test project_los_velocity(Vx[1:6, 1:6, 1:6], Vy[1:6, 1:6, 1:6], Vz[1:6, 1:6, 1:6],
+                                   e1, e2, nhat) ≈
+              -Vz[1:6, 1:6, 1:6][end:-1:1, :, end:-1:1] atol = 1e-12
+    end
+
     @testset "line-of-sight labels and metadata" begin
         @test los_label("z") == "z"
         @test los_label((45, 30)) == "th45_ph30"

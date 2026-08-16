@@ -79,24 +79,31 @@ end
 
 _box_centre(f) = ((size(f, 1) + 1) / 2, (size(f, 2) + 1) / 2, (size(f, 3) + 1) / 2)
 
+# The single resampling loop every projection goes through: `sample(x, y, z)`
+# says what to read at the source point, the geometry is decided here and here
+# only. Scalars and the velocity vector therefore cannot drift apart — they are
+# evaluated at the same points by construction, not by two loops agreeing.
+function _resample(sample, dims, ctr, e1, e2, nhat)
+    nx, ny, nz = dims
+    out = Array{Float64,3}(undef, nx, ny, nz)
+    Threads.@threads for k in 1:nz
+        for j in 1:ny, i in 1:nx
+            x, y, z = _source_point(i, j, k, ctr, e1, e2, nhat)
+            @inbounds out[i, j, k] = sample(x, y, z)
+        end
+    end
+    return out
+end
+
 """
     project_cube(field, e1, e2, nhat; periodic = true) -> Array{Float64,3}
 
 Resample a scalar `field` onto a grid whose third axis is `nhat`, keeping the
 input's shape and rotating about the box centre.
 """
-function project_cube(field::AbstractArray{<:Real,3}, e1, e2, nhat; periodic::Bool = true)
-    nx, ny, nz = size(field)
-    out = Array{Float64,3}(undef, nx, ny, nz)
-    ctr = _box_centre(field)
-    Threads.@threads for k in 1:nz
-        for j in 1:ny, i in 1:nx
-            x, y, z = _source_point(i, j, k, ctr, e1, e2, nhat)
-            @inbounds out[i, j, k] = _trilinear(field, x, y, z, periodic)
-        end
-    end
-    return out
-end
+project_cube(field::AbstractArray{<:Real,3}, e1, e2, nhat; periodic::Bool = true) =
+    _resample((x, y, z) -> _trilinear(field, x, y, z, periodic),
+              size(field), _box_centre(field), e1, e2, nhat)
 
 """
     project_los_velocity(Vx, Vy, Vz, e1, e2, nhat; periodic = true) -> Array{Float64,3}
@@ -104,25 +111,20 @@ end
 Resample the velocity *vector* field onto the rotated grid and return its
 component along the line of sight, `V · nhat`.
 
-Done in a single pass so only one output cube is allocated rather than three.
+The vector is read at the same source points as a scalar would be — the three
+components are sampled together and contracted with `nhat` on the spot, so this
+is exactly `nhat . (project_cube(Vx), project_cube(Vy), project_cube(Vz))` but
+in one pass, allocating one output cube instead of three.
 """
 function project_los_velocity(Vx::AbstractArray{<:Real,3}, Vy::AbstractArray{<:Real,3},
                               Vz::AbstractArray{<:Real,3}, e1, e2, nhat; periodic::Bool = true)
     size(Vx) == size(Vy) == size(Vz) ||
         throw(DimensionMismatch("the three velocity components must share the same shape."))
-    nx, ny, nz = size(Vx)
-    out = Array{Float64,3}(undef, nx, ny, nz)
-    ctr = _box_centre(Vx)
-    Threads.@threads for k in 1:nz
-        for j in 1:ny, i in 1:nx
-            x, y, z = _source_point(i, j, k, ctr, e1, e2, nhat)
-            @inbounds out[i, j, k] =
-                nhat[1] * _trilinear(Vx, x, y, z, periodic) +
-                nhat[2] * _trilinear(Vy, x, y, z, periodic) +
-                nhat[3] * _trilinear(Vz, x, y, z, periodic)
-        end
+    return _resample(size(Vx), _box_centre(Vx), e1, e2, nhat) do x, y, z
+        nhat[1] * _trilinear(Vx, x, y, z, periodic) +
+        nhat[2] * _trilinear(Vy, x, y, z, periodic) +
+        nhat[3] * _trilinear(Vz, x, y, z, periodic)
     end
-    return out
 end
 
 # Angles are formatted for use in a directory name: no dot, no minus sign.

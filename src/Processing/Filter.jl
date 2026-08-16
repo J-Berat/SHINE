@@ -50,17 +50,23 @@ function pixel_scale_arcmin(dx_pc::Real, distance_pc::Real)
     return rad2deg(dx_pc / distance_pc) * 60
 end
 
+# Shared by the angular and the spectral response: both turn a FWHM expressed in
+# physical units into a Gaussian sigma expressed in samples of the grid it is
+# applied on.
+function _fwhm_to_sigma(fwhm::Real, sample::Real, what::AbstractString)
+    fwhm > 0 || throw(ArgumentError("$what FWHM must be positive (got $fwhm)."))
+    sample > 0 || throw(ArgumentError("$what sample size must be positive (got $sample)."))
+    return FWHM_TO_SIGMA * fwhm / sample
+end
+
 """
     beam_sigma_pix(fwhm_arcmin, pixel_arcmin) -> Float64
 
 Gaussian σ **in pixels** of a beam of full width at half maximum `fwhm_arcmin`
 on a grid sampled at `pixel_arcmin` per pixel.
 """
-function beam_sigma_pix(fwhm_arcmin::Real, pixel_arcmin::Real)
-    fwhm_arcmin > 0 || throw(ArgumentError("fwhm_arcmin must be positive (got $fwhm_arcmin)."))
-    pixel_arcmin > 0 || throw(ArgumentError("pixel_arcmin must be positive (got $pixel_arcmin)."))
-    return FWHM_TO_SIGMA * fwhm_arcmin / pixel_arcmin
-end
+beam_sigma_pix(fwhm_arcmin::Real, pixel_arcmin::Real) =
+    _fwhm_to_sigma(fwhm_arcmin, pixel_arcmin, "beam")
 
 """
     resolve_beam(PixelLength_cm; kernel_size_hi = 2.0, beam_fwhm_arcmin = 0.0,

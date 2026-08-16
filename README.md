@@ -93,14 +93,23 @@ ProcessHI(simu, "z"; TCNM = 200, TWNM = 2000, velArray = vel,
           do_filter = true, beam_fwhm_arcmin = 3.5, distance_pc = 150)
 ```
 
+### Spectral response
+
+`spectral_fwhm_kms` convolves the velocity axis with the spectrometer's channel
+response, so a line narrower than a channel comes out broadened to the channel
+width instead of artificially sharp. It is independent of `do_filter` — the
+angular and the spectral response can each be applied on their own — and is
+recorded as `SPECFWHM`.
+
 ### Noise
 
-Receiver noise enters ahead of the beam, so in a smoothed map it is correlated
-over a beam width rather than independent per pixel. When a beam is applied the
-noise is therefore drawn white, passed through that same beam and renormalised
-so the map keeps the requested `sigma` — set `correlated_noise = false` for
-white noise instead (the right model for noise added after gridding). Either
-way the choice is recorded as `NOISETYP` in the header.
+Receiver noise enters ahead of the beam and the spectrometer, so in a finished
+map it is correlated over a beam width across the sky and over the channel
+response along velocity, rather than independent per pixel. The noise is
+therefore drawn white, passed through whichever responses the signal went
+through, and renormalised so the map keeps the requested `sigma` — set
+`correlated_noise = false` for white noise instead (the right model for noise
+added after gridding). The choice is recorded as `NOISETYP`.
 
 ## Outputs
 

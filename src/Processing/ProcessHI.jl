@@ -25,6 +25,9 @@ output directory.
                             instrument is quoted (Arecibo ≈ 3.5′, GBT ≈ 9′).
 - `distance_pc` (0)       : distance to the simulated region [pc], which sets
                             the angular scale of a pixel.
+- `spectral_fwhm_kms`(0)  : FWHM [km/s] of the spectrometer's channel response,
+                            convolved along the velocity axis. Independent of
+                            `do_filter` — either response can be applied alone.
 - `add_noise` (false)     : add Gaussian noise of std `sigma` [K]; independent
                             realisation per cube, drawn from `rng`.
 - `correlated_noise`(true): when a beam is applied, filter the noise through it
@@ -42,6 +45,7 @@ function ProcessHI(simu, LOS;
                    compute_stats::Bool = false,
                    do_filter::Bool = false, kernel_size_hi::Real = 2.0,
                    beam_fwhm_arcmin::Real = 0.0, distance_pc::Real = 0.0,
+                   spectral_fwhm_kms::Real = 0.0,
                    add_noise::Bool = false, sigma::Real = 0.0, correlated_noise::Bool = true,
                    rng = Random.default_rng(),
                    mu::Real = 1.0, therm::Real = 0.0, metadata = nothing)
@@ -52,6 +56,7 @@ function ProcessHI(simu, LOS;
 
     # --- read fields -------------------------------------------------------
     n, VLOS, T = ReadSimulation(simu, LOS, conversionn, conversionT, conversionV)
+    dv = length(velArray) > 1 ? abs(float(velArray[2] - velArray[1])) : 1.0
 
     # --- phase separation + column densities -------------------------------
     info_user("Separating neutral phases and integrating column densities")
@@ -99,17 +104,34 @@ function ProcessHI(simu, LOS;
         ))
     end
 
-    # --- optional angular smoothing ---------------------------------------
+    # --- optional instrumental response (beam and/or spectral) -------------
     beam = nothing
-    if do_filter
-        beam = resolve_beam(PixelLength_cm; kernel_size_hi = kernel_size_hi,
-                            beam_fwhm_arcmin = beam_fwhm_arcmin, distance_pc = distance_pc)
-        info_user("Applying Gaussian beam ($(beam_description(beam)))")
-        for (name, cube) in cubes
-            startswith(name, "tau") || smooth_cube!(cube, beam.sigma_pix)  # keep τ un-smoothed
+    spectral_sigma = nothing
+    if do_filter || spectral_fwhm_kms > 0
+        if do_filter
+            beam = resolve_beam(PixelLength_cm; kernel_size_hi = kernel_size_hi,
+                                beam_fwhm_arcmin = beam_fwhm_arcmin, distance_pc = distance_pc)
+            info_user("Applying Gaussian beam ($(beam_description(beam)))")
+            for (name, cube) in cubes
+                startswith(name, "tau") || smooth_cube!(cube, beam.sigma_pix)  # keep τ un-smoothed
+            end
+            metadata = beam_metadata(metadata, beam)
         end
-        # Everything written from here on is at the beam resolution, so record it.
-        metadata = beam_metadata(metadata, beam)
+
+        if spectral_fwhm_kms > 0
+            spectral_sigma = channel_sigma(spectral_fwhm_kms, dv)
+            info_user("Applying spectral response (FWHM = $(spectral_fwhm_kms) km/s, " *
+                      "σ = $(round(spectral_sigma, digits = 3)) chan)")
+            spectral_sigma >= 0.5 || warn_user(
+                "The spectral response is narrower than half a channel — the velocity " *
+                "grid under-samples it and the cubes will barely change.")
+            for (name, cube) in cubes
+                startswith(name, "tau") || smooth_spectral!(cube, spectral_sigma)
+            end
+            metadata = merge_metadata(metadata, Dict("SPECFWHM" => float(spectral_fwhm_kms)))
+        end
+
+        # Everything written from here on is at the instrument's resolution.
         resultspath = joinpath(resultspath, "filtered")
         mkpath(resultspath)
     end
@@ -121,16 +143,15 @@ function ProcessHI(simu, LOS;
         # than independent per pixel. `correlated_noise = false` falls back to
         # white noise, the right model for noise added after gridding.
         noise_sigma_pix = (beam !== nothing && correlated_noise) ? beam.sigma_pix : nothing
-        info_user(noise_sigma_pix === nothing ?
-                  "Adding white Gaussian noise (σ = $(sigma) K)" :
-                  "Adding beam-correlated Gaussian noise (σ = $(sigma) K)")
+        noise_sigma_chan = (spectral_sigma !== nothing && correlated_noise) ? spectral_sigma : nothing
+        label = noise_type_label(noise_sigma_pix, noise_sigma_chan)
+        info_user("Adding $(label) Gaussian noise (σ = $(sigma) K)")
         for (name, cube) in cubes
             startswith(name, "Tb") || continue      # noise only on brightness cubes
-            add_noise!(cube, sigma, rng; sigma_pix = noise_sigma_pix)
+            add_noise!(cube, sigma, rng; sigma_pix = noise_sigma_pix,
+                       sigma_chan = noise_sigma_chan)
         end
-        metadata = merge_metadata(metadata, Dict(
-            "NOISE" => float(sigma),
-            "NOISETYP" => noise_sigma_pix === nothing ? "white" : "beam-correlated"))
+        metadata = merge_metadata(metadata, Dict("NOISE" => float(sigma), "NOISETYP" => label))
     end
 
     # --- write cubes -------------------------------------------------------
@@ -151,7 +172,6 @@ function ProcessHI(simu, LOS;
     # --- FFT CNM tracer ----------------------------------------------------
     if compute_fftcnm
         info_user("Computing FFT CNM tracer map")
-        dv = length(velArray) > 1 ? abs(float(velArray[2] - velArray[1])) : 1.0
         WriteData2D(resultspath, fft_cnm_map(TbHI, dv), "fftcnm"; metadata = metadata)
     end
 

@@ -35,7 +35,8 @@ const _METADATA_COMMENTS = Dict(
     "PIXSCALE" => "Sky-plane pixel scale [arcmin]",
     "DISTANCE" => "Assumed source distance [pc]",
     "NOISE" => "Noise standard deviation [K]",
-    "NOISETYP" => "Noise spatial correlation",
+    "NOISETYP" => "Noise correlation model",
+    "SPECFWHM" => "Spectral response FWHM [km/s]",
 )
 
 """

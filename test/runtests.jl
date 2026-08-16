@@ -234,6 +234,35 @@ using Random: MersenneTwister
         end
     end
 
+    @testset "spectral response broadens along velocity only" begin
+        @test channel_sigma(1.0, 1.0) ≈ 1 / (2 * sqrt(2 * log(2)))
+        @test channel_sigma(4.0, 2.0) ≈ channel_sigma(2.0, 1.0)
+        @test_throws ArgumentError channel_sigma(0.0, 1.0)
+        @test_throws ArgumentError channel_sigma(1.0, 0.0)
+        @test_throws ArgumentError smooth_spectral!(zeros(2, 2, 5), 0.0)
+
+        cube = zeros(4, 5, 21)
+        cube[2, 3, 11] = 1.0
+        smooth_spectral!(cube, 2.0)
+        @test cube[2, 3, 9] > 0                     # spread along velocity
+        @test cube[2, 3, 11] < 1.0                  # peak lowered
+        @test cube[1, 3, 11] == 0                   # no leak between sky pixels
+        @test cube[2, 4, 11] == 0
+        @test sum(cube) ≈ 1.0 rtol = 1e-6           # flux conserving
+        # A line narrower than the response comes out at the response width:
+        # the second moment can only grow.
+        narrow = zeros(1, 1, 41); narrow[1, 1, 21] = 1.0
+        broad = copy(narrow)
+        smooth_spectral!(broad, 3.0)
+        chan = collect(1:41)
+        secmom(s) = sum(s .* (chan .- 21) .^ 2) / sum(s)
+        @test secmom(vec(broad)) > secmom(vec(narrow))
+
+        @test 0 < spectral_noise_gain(2.0) < 1
+        @test spectral_noise_gain(4.0) < spectral_noise_gain(2.0)
+        @test_throws ArgumentError spectral_noise_gain(0.0)
+    end
+
     @testset "beam noise gain matches what the beam does to white noise" begin
         # Smoothing can only reduce the scatter, and the wider the beam the more.
         @test 0 < beam_noise_gain(2.0) < 1
@@ -284,6 +313,33 @@ using Random: MersenneTwister
         @test_throws ArgumentError add_noise!(untouched, -1.0, MersenneTwister(1))
     end
 
+    @testset "channel-correlated noise" begin
+        lagv(c) = cor(vec(c[:, :, 1:end-1]), vec(c[:, :, 2:end]))
+        lag1(m) = cor(vec(m[1:end-1, :]), vec(m[2:end, :]))
+        nx = ny = 64
+
+        # Spectral response only: neighbouring channels become correlated while
+        # neighbouring sky pixels stay independent.
+        spec = zeros(nx, ny, 24)
+        add_noise!(spec, 0.4, MersenneTwister(11); sigma_chan = 2.0)
+        @test std(spec) ≈ 0.4 rtol = 0.15
+        @test lagv(spec) > 0.8
+        @test abs(lag1(spec[:, :, 1])) < 0.1
+
+        # Both responses: correlated on the sky *and* along velocity, still at
+        # the requested sigma.
+        both = zeros(nx, ny, 24)
+        add_noise!(both, 0.4, MersenneTwister(11); sigma_pix = 2.0, sigma_chan = 2.0)
+        @test std(both) ≈ 0.4 rtol = 0.2
+        @test lagv(both) > 0.8
+        @test lag1(both[:, :, 1]) > 0.7
+
+        @test Shine.noise_type_label(nothing, nothing) == "white"
+        @test Shine.noise_type_label(2.0, nothing) == "beam-correlated"
+        @test Shine.noise_type_label(nothing, 2.0) == "channel-correlated"
+        @test Shine.noise_type_label(2.0, 2.0) == "beam+channel-correlated"
+    end
+
     @testset "noise model is recorded in the FITS header" begin
         mktempdir() do dir
             demo = make_demo_data(joinpath(dir, "demo"); npix = 8)
@@ -307,10 +363,26 @@ using Random: MersenneTwister
                             correlated_noise = false, base...)
             @test noisetype(joinpath(out, "TbHI.fits")) == "white"
 
-            # No beam, nothing to correlate with: the noise stays white even
-            # though correlated_noise defaults to true.
+            # No response at all, nothing to correlate with: the noise stays
+            # white even though correlated_noise defaults to true.
             out = ProcessHI(demo.simu_dir, "z"; base...)
             @test noisetype(joinpath(out, "TbHI.fits")) == "white"
+            @test basename(out) == "HI"
+
+            # A spectral response alone still routes to filtered/ and correlates
+            # the noise along velocity only.
+            out = ProcessHI(demo.simu_dir, "z"; spectral_fwhm_kms = 3.0, base...)
+            @test basename(out) == "filtered"
+            hdr = Shine.FITSIO.FITS(joinpath(out, "TbHI.fits")) do f
+                Shine.FITSIO.read_header(f[1])
+            end
+            @test hdr["NOISETYP"] == "channel-correlated"
+            @test hdr["SPECFWHM"] ≈ 3.0
+
+            # Both responses together.
+            out = ProcessHI(demo.simu_dir, "z"; do_filter = true, kernel_size_hi = 2.0,
+                            spectral_fwhm_kms = 3.0, base...)
+            @test noisetype(joinpath(out, "TbHI.fits")) == "beam+channel-correlated"
         end
     end
 
